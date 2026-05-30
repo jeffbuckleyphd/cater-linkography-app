@@ -1,193 +1,2508 @@
 library(shiny)
-library(DT)
+library(shinyjs)
 library(igraph)
-library(tidyverse)
+library(dplyr)
+library(tidyr)
+library(tibble)
 library(ggplot2)
 library(readxl)
-library(shinyjs)
+library(colourpicker)
+library(bslib)
+library(stringr)
+library(purrr)
+library(openxlsx)
+library(reactable)
 
 # Define UI for the application
-ui <- fluidPage(
-  useShinyjs(),  # Initialize shinyjs
+ui <- page_navbar(
+  title = div(
+    class = "brand-title",
+    "CATER",
+    span("Linkography")
+  ),
   
-  titlePanel("Linkography Web App"),
+  theme = bs_theme(
+    version = 5,
+    bg = "#FFFFFF",
+    fg = "#2d3436",
+    primary = "#0A4F57",
+    secondary = "#06AED5",
+    base_font = font_google("Inter"),
+    heading_font = font_google("Outfit")
+  ),
   
-  tabsetPanel(
-    tabPanel("Plot",  # First tab for the interactive plot
-             sidebarLayout(
-               sidebarPanel(
-                 fileInput("file", "Upload Excel File", accept = c(".xlsx")),
-                 
-                 # Display the Link Index after file upload
-                 verbatimTextOutput("linkIndexOutput"),
-                 
-                 hr(),
-                 
-                 # Numeric inputs for PDF export settings
-                 numericInput("pdfWidth", "PDF Width (in mm):", value = 297, min = 1),
-                 numericInput("pdfHeight", "PDF Height (in mm):", value = 210, min = 1),
-                 downloadButton("downloadPlot", "Download Plot as PDF"),
-                 
-                 hr(),  # A horizontal line to separate the sections
-                 h4("Adjust Base Plot Properties"),  # A header for the base plot adjustments
-                 
-                 fluidRow(
-                   column(12,
-                          sliderInput("textOffsetX", "Adjust Text Horizontal Position:", min = -2, max = 2, value = 0, step = 0.01),
-                          sliderInput("textOffsetY", "Adjust Text Vertical Position:", min = -2, max = 2, value = 0, step = 0.01),
-                          sliderInput("textSize", "Adjust Text Size:", min = 1, max = 10, value = 3, step = 0.5),
-                          sliderInput("moveDisplayFrequency", "Display Every nth Move Label:", min = 1, max = 10, value = 1, step = 1),
-                          
-                   ),
-                   column(12,
-                          colourpicker::colourInput("pointColor", "Select Move Color:", value = "black"),
-                          sliderInput("pointSize", "Select Move Size:", min = 1, max = 10, value = 3, step = 0.5),
-                   ),
-                   column(12,
-                          colourpicker::colourInput("midPointColor", "Select Link Color:", value = "blue"),
-                          sliderInput("midPointSize", "Select Link Size:", min = 1, max = 10, value = 3, step = 0.5)
-                   ),
-                   column(12,
-                          colourpicker::colourInput("segmentColor", "Select Line Color:", value = "black"),
-                          sliderInput("segmentSize", "Select Line Size:", min = 0.5, max = 5, value = 1, step = 0.1)
-                   ),
-                   column(12,
-                          sliderInput("yendScale", "Adjust Vertical Scaling:", min = 0, max = 2, value = 1, step = 0.01),  # Slider for scaling mid_y
-                          sliderInput("yAxisRange", "Set Y-Axis Range:", min = -50, max = 50, value = c(-10, 10))
-                   )
-                 )
-               ),
-               
-               mainPanel(
-                 plotOutput("interactivePlot", height = "700px"),
-                 
-                 hr(),  # A horizontal line to separate sections
-                 h4("Adjust Move Type Visibility"),  # A header for the move visibility adjustments
-                 
-                 fluidRow(
-                   column(3,
-                          checkboxInput("showUniForward", "Show Unidirectional Forward Lines", value = FALSE),
-                          colourpicker::colourInput("uniForwardColor", "Unidirectional Forward Color:", value = "deeppink"),
-                          sliderInput("uniForwardWeight", "Unidirectional Forward Line Weight:", min = 0.5, max = 3, value = 2, step = 0.1),
-                          hr(),
-                          checkboxInput("showUniBackward", "Show Unidirectional Backward Lines", value = FALSE),
-                          colourpicker::colourInput("uniBackwardColor", "Unidirectional Backward Color:", value = "darkgoldenrod2"),
-                          sliderInput("uniBackwardWeight", "Unidirectional Backward Line Weight:", min = 0.5, max = 3, value = 2, step = 0.1),
-                          hr(),
-                          checkboxInput("showSawtooth", "Show Sawtooth Pattern", value = FALSE),
-                          colourpicker::colourInput("sawtoothColor", "Sawtooth Pattern Color:", value = "red"),
-                          sliderInput("sawtoothWeight", "Sawtooth Line Weight:", min = 0.5, max = 3, value = 2, step = 0.1)
-                   ),
-                   column(3,
-                          checkboxInput("showWebChunk", "Show Web and Chunk Patterns", value = FALSE),
-                          actionButton("runWebChunk", "Run Web and Chunk Analysis"),
-                          colourpicker::colourInput("webChunkLowColor", "Web and Chunk Low Color:", value = "green"),
-                          colourpicker::colourInput("webChunkHighColor", "Web and Chunk High Color:", value = "green"),
-                          sliderInput("webChunkWeight", "Web and Chunk Base Line Weight:", min = 0.5, max = 3, value = 2, step = 0.1),
-                          numericInput("minMoves", "Minimum Moves:", value = 3, min = 2),
-                          numericInput("maxMoves", "Maximum Moves:", value = 8, min = 3),
-                          numericInput("minConnectionPercentage", "Minimum Connection Percentage:", value = 50, min = 0, max = 100),
-                          numericInput("maxConnectionPercentage", "Maximum Connection Percentage:", value = 100, min = 0, max = 100)
-                   ),
-                   column(3,
-                          checkboxInput("showArchiograph", "Show Archiograph", value = FALSE),
-                          selectInput("archiographColumn", "Select Categorical Column for Archiograph:", choices = NULL),
-                          verbatimTextOutput("numFactorsOutput"),  # Output to display number of unique factors
-                          uiOutput("colorPickersUI"),  # Placeholder for dynamic color pickers
-                          sliderInput("archiographWeight", "Archiograph Line Weight:", min = 0.5, max = 5, value = 1, step = 0.1),
-                          sliderInput("yarcScale", "Adjust Archiograph Scaling:", min = 0, max = 5, value = 1, step = 0.01),  # Slider for scaling mid_y
-                   ),
-                   column(3,  # New column for custom patterns
-                          h4("Custom Patterns"),
-                          actionButton("addPattern", "Add New Pattern"),
-                          uiOutput("customPatternsUI")
-                   )
-                 ),
-                 
-                 hidden(
-                   fluidRow(
-                     column(3,
-                            checkboxInput("showBidirectional", "Show Bidirectional Lines", value = FALSE),
-                            colourpicker::colourInput("bidirectionalColor", "Bidirectional Color:", value = "green"),
-                            sliderInput("bidirectionalWeight", "Bidirectional Line Weight:", min = 0.5, max = 3, value = 2, step = 0.1)
-                     )
-                   )
-                 )
-               )
-             )
-    ),
+  header = tagList(
+    useShinyjs(),
     
-    tabPanel("Link Span",  # Second tab for the link span table
-             DTOutput("linkSpanTable")),
+    tags$head(
+      tags$style(HTML("
+      :root {
+        --cater-midnight: #0A4F57;
+        --cater-latte: #FFFAEA;
+        --cater-salmon: #FA8072;
+        --cater-electric: #06AED5;
+        --cater-white: #FFFFFF;
+        --cater-text: #2d3436;
+        --cater-page: #F6F7F9;
+        --cater-border: rgba(10, 79, 87, 0.14);
+      }
+
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        background: var(--cater-white);
+        color: var(--cater-text);
+        overscroll-behavior: none;
+      }
+
+      .navbar {
+        min-height: 54px;
+        padding-top: 3px;
+        padding-bottom: 3px;
+        background: var(--cater-white) !important;
+        box-shadow: 0 2px 14px rgba(10, 79, 87, 0.10);
+        z-index: 1000;
+      }
+
+      .navbar .container-fluid {
+        min-height: 48px;
+      }
+      
+      /* Main Navbar Tab Styling */
+      .navbar-nav .nav-link {
+        font-weight: 700 !important;
+        font-size: 0.92rem !important;
+        color: #5B6770 !important;
+        padding: 6px 10px !important; /* <--- NEW: Tighter internal padding */
+        margin: 0 2px !important;     /* <--- NEW: Brings the tabs physically closer together */
+        border-radius: 8px !important;
+        transition: all 0.2s ease !important;
+        min-width: 175px !important;  /* <--- NEW: Slightly smaller width so short words don't float in empty space */
+        text-align: center !important;
+      }
+
+      .navbar-nav .nav-link:hover {
+        color: var(--cater-midnight) !important;
+        background: rgba(250, 128, 114, 0.1) !important;
+      }
+
+      .navbar-nav .nav-link.active {
+        color: var(--cater-white) !important;
+        background: var(--cater-salmon) !important; 
+        box-shadow: 0 4px 12px rgba(250, 128, 114, 0.35) !important;
+      }
+
+      .brand-title {
+        font-weight: 800;
+        letter-spacing: 0.02em;
+        color: var(--cater-midnight);
+        margin-right: 40px;
+      }
+
+      .brand-title span {
+        font-weight: 500;
+        color: #5B6770;
+        margin-left: 4px;
+      }
+
+      .bslib-page-navbar {
+        height: 100vh;
+        overflow: hidden;
+      }
+
+      .tab-content {
+        height: calc(100vh - 54px);
+        overflow: hidden;
+      }
+
+      .tab-pane {
+        height: 100%;
+        overflow: hidden;
+      }
+
+      .plot-shell,
+      .table-page {
+        height: 100%;
+        min-height: 0;
+        overflow: hidden;
+        padding: 10px 12px 12px 12px;
+        box-sizing: border-box;
+        background: var(--cater-page);
+      }
+
+      .plot-stage {
+        height: 100%;
+        min-height: 0;
+        display: grid;
+        grid-template-columns: 60px 320px minmax(0, 1fr);
+        gap: 12px;
+      }
+
+      .tool-rail {
+        height: 100%;
+        min-height: 0;
+        background: var(--cater-midnight);
+        border-radius: 18px;
+        padding: 8px 7px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 7px;
+        box-shadow: 0 10px 24px rgba(10, 79, 87, 0.16);
+      }
+
+      .tool-button {
+        width: 44px !important;
+        height: 44px !important;
+        min-width: 44px !important;
+        padding: 0 !important;
+        border-radius: 13px !important;
+        border: 0 !important;
+        background: rgba(255, 255, 255, 0.12) !important;
+        color: rgba(255, 255, 255, 0.86) !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        box-shadow: none !important;
+      }
+
+      .tool-button:hover {
+        background: rgba(255, 255, 255, 0.22) !important;
+        color: white !important;
+      }
+
+      .tool-button.active {
+        background: var(--cater-white) !important;
+        color: var(--cater-midnight) !important;
+      }
+
+      .tool-spacer {
+        flex: 1 1 auto;
+      }
+
+      .settings-pane,
+      .plot-holder,
+      .plot-card,
+      .control-card {
+        background: var(--cater-white);
+        border: 0;
+        border-radius: 18px;
+        box-shadow: 0 8px 22px rgba(31, 41, 51, 0.08);
+        overflow: hidden;
+      }
+
+      .settings-pane,
+      .plot-holder {
+        height: 100%;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .settings-header,
+      .settings-note,
+      .plot-subtitle {
+        display: none;
+      }
+
+      .settings-body {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow-y: auto;
+        overflow-x: hidden;
+        padding: 14px 16px 16px 16px;
+      }
+
+      .settings-body::-webkit-scrollbar {
+        width: 8px;
+      }
+
+      .settings-body::-webkit-scrollbar-track {
+        background: #EEF1F4;
+        border-radius: 999px;
+      }
+
+      .settings-body::-webkit-scrollbar-thumb {
+        background: #B8C4CA;
+        border-radius: 999px;
+      }
+
+      .settings-body .tab-content,
+      .settings-body .tab-pane {
+        height: auto;
+        overflow: visible;
+      }
+
+      .settings-body .shiny-input-container,
+      .settings-body .form-control {
+        width: 100% !important;
+        max-width: 100% !important;
+      }
+
+      .settings-body .shiny-input-container {
+        margin-bottom: 12px;
+      }
+
+      .settings-section-title {
+        font-size: 0.74rem;
+        font-weight: 850;
+        color: var(--cater-midnight);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        margin: 4px 0 10px 0;
+      }
+
+      .metric-box {
+        background: #EEF7F8;
+        border: 1px solid #D5EAED;
+        border-radius: 13px;
+        padding: 10px 12px;
+        margin-top: 10px;
+        margin-bottom: 12px;
+      }
+
+      .metric-label {
+        display: block;
+        text-transform: uppercase;
+        font-size: 0.7rem;
+        letter-spacing: 0.08em;
+        color: #567178;
+        font-weight: 800;
+        margin-bottom: 4px;
+      }
+
+      .metric-box pre {
+        margin: 0;
+        padding: 0;
+        background: transparent;
+        border: 0;
+        color: var(--cater-midnight);
+        font-weight: 700;
+        white-space: normal;
+      }
+
+      .plot-holder-header {
+        flex: 0 0 42px;
+        height: 42px;
+        padding: 8px 14px;
+        border-bottom: 1px solid #E7EAEE;
+        display: flex;
+        align-items: center;
+      }
+
+      .plot-title {
+        font-weight: 850;
+        color: var(--cater-midnight);
+      }
+
+      .plot-holder-body {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow: hidden;
+        padding: 2px;
+      }
+
+      .plot-holder-body .shiny-plot-output {
+        height: 100% !important;
+        width: 100% !important;
+      }
+
+      .control-pair {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 0;
+      }
+
+      .btn-default,
+      .btn-primary {
+        border-radius: 999px;
+        font-weight: 700;
+      }
+
+      .plot-card .card-header,
+      .control-card .card-header {
+        background: var(--cater-midnight);
+        border-bottom: 4px solid var(--cater-salmon);
+        padding: 13px 17px;
+        font-weight: 850;
+        color: var(--cater-white);
+        letter-spacing: 0.01em;
+      }
+      
+      /* Custom Modern File Input */
+      .settings-body .input-group {
+        display: flex !important;
+        flex-wrap: nowrap !important;
+        align-items: stretch;
+        border-radius: 999px !important;
+        border: 1px solid rgba(10, 79, 87, 0.2) !important;
+        overflow: hidden; /* Clips the square buttons to fit the pill shape */
+        background: var(--cater-white);
+        box-shadow: 0 2px 6px rgba(10, 79, 87, 0.04);
+      }
+
+      .settings-body .input-group-prepend,
+      .settings-body .input-group-btn {
+        display: flex;
+        margin: 0 !important;
+      }
+
+      .settings-body .input-group-btn .btn-file {
+        border-radius: 0 !important; 
+        border: none !important;
+        background: var(--cater-midnight) !important;
+        color: var(--cater-white) !important;
+        font-weight: 700 !important;
+        padding: 8px 16px !important;
+        margin: 0 !important;
+        display: flex;
+        align-items: center;
+        white-space: nowrap;
+        transition: all 0.2s ease;
+      }
+
+      .settings-body .input-group-btn .btn-file:hover {
+        background: #0d606a !important; /* Slightly lighter on hover */
+      }
+
+      .settings-body .input-group .form-control {
+        border: none !important;
+        background: transparent !important;
+        box-shadow: none !important;
+        padding: 8px 12px !important;
+        color: var(--cater-text) !important;
+        font-size: 0.82rem !important;
+        height: auto !important;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis; /* Adds '...' if the filename is super long */
+      }
+
+      /* Table page layout */
+      .table-page .plot-card,
+      .table-page > .card {
+        height: 100%;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .table-page .card-body {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        padding: 12px;
+      }
+
+      .table-page .tabbable {
+        flex: 1 1 auto;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .table-page .tab-content {
+        flex: 1 1 auto;
+        height: auto;
+        min-height: 0;
+        overflow: hidden;
+      }
+
+      .table-page .tab-pane {
+        height: 100%;
+        min-height: 0;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+      }
+
+      /* Reactable specific sizing to fill container */
+      .reactable {
+        flex: 1 1 auto;
+        height: 100% !important;
+      }
+
+      /* CATER tabs */
+      .table-page .nav-tabs {
+        flex: 0 0 auto;
+        border-bottom: 0 !important;
+        gap: 6px;
+        margin-bottom: 14px;
+        padding: 8px;
+        background: var(--cater-white);
+        border: 1px solid rgba(10, 79, 87, 0.12);
+        border-radius: 999px;
+        display: inline-flex;
+        flex-wrap: wrap;
+        box-shadow: 0 5px 14px rgba(10, 79, 87, 0.06);
+      }
+
+      .table-page .nav-tabs .nav-link {
+        border: 0 !important;
+        border-radius: 999px !important;
+        color: var(--cater-midnight) !important;
+        font-weight: 750;
+        font-size: 0.84rem;
+        padding: 7px 13px;
+        background: transparent !important;
+      }
+
+      .table-page .nav-tabs .nav-link:hover {
+        background: rgba(6, 174, 213, 0.10) !important;
+        color: var(--cater-midnight) !important;
+      }
+
+      .table-page .nav-tabs .nav-link.active,
+      .table-page .nav-tabs .nav-item.show .nav-link {
+        background: var(--cater-midnight) !important;
+        color: var(--cater-white) !important;
+        box-shadow: 0 5px 12px rgba(10, 79, 87, 0.18);
+      }
+
+      /* Critical Moves sidebar page */
+      .table-page .bslib-sidebar-layout {
+        height: 100%;
+        min-height: 0;
+      }
+
+      .table-page .bslib-sidebar-layout > .main {
+        height: 100%;
+        min-height: 0;
+        overflow: hidden;
+      }
+
+      .table-page .bslib-sidebar-layout > .main > .card {
+        height: 100%;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+      }
+
+      @media (max-width: 1150px) {
+        html,
+        body {
+          overflow: auto;
+        }
+
+        .bslib-page-navbar,
+        .tab-content,
+        .tab-pane {
+          height: auto;
+          overflow: visible;
+        }
+
+        .plot-shell,
+        .table-page {
+          height: auto;
+          overflow: visible;
+        }
+
+        .plot-stage {
+          height: auto;
+          grid-template-columns: 1fr;
+        }
+
+        .tool-rail {
+          height: auto;
+          flex-direction: row;
+          justify-content: flex-start;
+          overflow-x: auto;
+        }
+
+        .settings-pane {
+          height: auto;
+        }
+
+        .settings-body {
+          overflow-y: visible;
+        }
+
+        .plot-holder {
+          height: 720px;
+        }
+
+        .table-page .plot-card,
+        .table-page > .card,
+        .table-page .card-body,
+        .table-page .tabbable,
+        .table-page .tab-content,
+        .table-page .tab-pane {
+          height: auto;
+          overflow: visible;
+        }
+      }
+      "))
+    )
+  ),
+  
+  nav_panel(
+    "Plot",
     
-    tabPanel("Move Classification",  # Third tab for the move classification table
-             DTOutput("moveClassificationTable")),
-    
-    tabPanel("Critical Moves",  # Fourth tab for the critical move classification table
-             sidebarLayout(
-               sidebarPanel(
-                 
-                 # Display the total number of moves
-                 verbatimTextOutput("totalNumberMoves"),
-                 
-                 # Display critical move thresholds
-                 
-                 verbatimTextOutput("criticalForwardMoveA"),
-                 verbatimTextOutput("criticalForwardMoveB"),
-                 verbatimTextOutput("criticalForwardMoveC"),
-                 verbatimTextOutput("criticalBackwardMoveA"),
-                 verbatimTextOutput("criticalBackwardMoveB"),
-                 verbatimTextOutput("criticalBackwardMoveC")
-               ),
-               mainPanel(
-                 DTOutput("criticalMoveSummaryTable")
-               )
-             )
-             )
+    div(
+      class = "plot-shell",
+      
+      div(
+        class = "plot-stage",
+        
+        div(
+          class = "tool-rail",
+          
+          actionButton("tool_data", label = NULL, icon = icon("file-upload"), class = "tool-button", title = "Data"),
+          actionButton("tool_base", label = NULL, icon = icon("sliders-h"), class = "tool-button", title = "Base plot"),
+          actionButton("tool_labels", label = NULL, icon = icon("font"), class = "tool-button", title = "Move labels"),
+          actionButton("tool_overlays", label = NULL, icon = icon("layer-group"), class = "tool-button", title = "Overlays"),
+          actionButton("tool_webchunk", label = NULL, icon = icon("sitemap"), class = "tool-button", title = "Web and chunk"),
+          actionButton("tool_archio", label = NULL, icon = icon("rainbow"), class = "tool-button", title = "Archiograph"),
+          actionButton("tool_trace", label = NULL, icon = icon("route"), class = "tool-button", title = "Trace pathways"),
+          actionButton("tool_custom", label = NULL, icon = icon("draw-polygon"), class = "tool-button", title = "Custom patterns"),
+          
+          div(class = "tool-spacer"),
+          
+          actionButton("tool_export", label = NULL, icon = icon("file-pdf"), class = "tool-button", title = "Export")
+        ),
+        
+        div(
+          class = "settings-pane",
+          
+          div(
+            class = "settings-body",
+            
+            tabsetPanel(
+              id = "settingsPanel",
+              type = "hidden",
+              selected = "data",
+              
+              tabPanel(
+                title = "Data",
+                value = "data",
+                
+                div(class = "settings-section-title", "Data"),
+                
+                fileInput(
+                  "file",
+                  "Upload Excel file",
+                  accept = c(".xlsx"),
+                  buttonLabel = "Browse...",
+                  placeholder = "No file selected"
+                ),
+                
+                div(
+                  class = "metric-box",
+                  span(class = "metric-label", "Link index"),
+                  verbatimTextOutput("linkIndexOutput")
+                )
+              ),
+              
+              tabPanel(
+                title = "Base plot",
+                value = "base",
+                
+                div(class = "settings-section-title", "Base links"),
+                
+                colourpicker::colourInput("segmentColor", "Base link colour", value = "black"),
+                sliderInput("segmentSize", "Base link line weight", min = 0.5, max = 5, value = 1, step = 0.1),
+                
+                div(class = "settings-section-title", "Move points"),
+                
+                colourpicker::colourInput("pointColor", "Move point colour", value = "black"),
+                sliderInput("pointSize", "Move point size", min = 1, max = 10, value = 3, step = 0.5),
+                
+                div(class = "settings-section-title", "Links"),
+                
+                checkboxInput("showMidpoints", "Show links", value = TRUE),
+                
+                conditionalPanel(
+                  condition = "input.showMidpoints",
+                  colourpicker::colourInput("midPointColor", "Link colour", value = "black"),
+                  sliderInput("midPointSize", "Link size", min = 1, max = 10, value = 3, step = 0.5)
+                ),
+                
+                div(class = "settings-section-title", "Vertical range"),
+                
+                sliderInput("yendScale", "Vertical scaling", min = 0, max = 2, value = 0.5, step = 0.01),
+                checkboxInput("autoYAxis", "Auto-fit vertical range", value = TRUE),
+                
+                conditionalPanel(
+                  condition = "!input.autoYAxis",
+                  sliderInput(
+                    "yAxisRange",
+                    "Manual y-axis range",
+                    min = -100,
+                    max = 50,
+                    value = c(-30, 5)
+                  )
+                ),
+                
+                div(class = "settings-section-title", "Crop linkograph"),
+                sliderInput("plotCropRange", "Crop visible moves", min = 1, max = 100, value = c(1, 100), step = 1),
+              ),
+              
+              tabPanel(
+                title = "Labels",
+                value = "labels",
+                
+                div(class = "settings-section-title", "Move labels"),
+                
+                sliderInput("textSize", "Label size", min = 1, max = 10, value = 3, step = 0.5),
+                sliderInput("textOffsetX", "Label horizontal position", min = -2, max = 2, value = 0, step = 0.01),
+                sliderInput("textOffsetY", "Label vertical position", min = -2, max = 2, value = 0, step = 0.01),
+                sliderInput("moveDisplayFrequency", "Display every nth move label", min = 1, max = 10, value = 1, step = 1),
+                
+                div(class = "settings-section-title", "Critical Move Notation"),
+                
+                checkboxInput("showCmNotation", "Show CM notation on plot", value = FALSE),
+                conditionalPanel(
+                  condition = "input.showCmNotation",
+                  sliderInput("cmNotationY", "Notation Height", min = 0, max = 3, value = 0.6, step = 0.05),
+                  sliderInput("cmLabelXOffset", "Label Left Offset", min = -5, max = 0, value = -0.75, step = 0.25),
+                  sliderInput("cmNotationSize", "Notation Font Size", min = 2, max = 10, value = 4.5, step = 0.1)
+                ),
+              ),
+              
+              tabPanel(
+                title = "Overlays",
+                value = "overlays",
+                
+                div(class = "settings-section-title", "Unidirectional forward"),
+                
+                checkboxInput("showUniForward", "Show unidirectional forward lines", value = FALSE),
+                
+                conditionalPanel(
+                  condition = "input.showUniForward",
+                  colourpicker::colourInput("uniForwardColor", "Forward line colour", value = "deeppink"),
+                  sliderInput("uniForwardWeight", "Forward line weight", min = 0.5, max = 3, value = 2, step = 0.1)
+                ),
+                
+                div(class = "settings-section-title", "Unidirectional backward"),
+                
+                checkboxInput("showUniBackward", "Show unidirectional backward lines", value = FALSE),
+                
+                conditionalPanel(
+                  condition = "input.showUniBackward",
+                  colourpicker::colourInput("uniBackwardColor", "Backward line colour", value = "darkgoldenrod2"),
+                  sliderInput("uniBackwardWeight", "Backward line weight", min = 0.5, max = 3, value = 2, step = 0.1)
+                ),
+                
+                div(class = "settings-section-title", "Bidirectional"),
+                
+                checkboxInput("showBidirectional", "Show bidirectional lines", value = FALSE),
+                
+                conditionalPanel(
+                  condition = "input.showBidirectional",
+                  colourpicker::colourInput("bidirectionalColor", "Bidirectional line colour", value = "green"),
+                  sliderInput("bidirectionalWeight", "Bidirectional line weight", min = 0.5, max = 3, value = 2, step = 0.1)
+                ),
+                
+                div(class = "settings-section-title", "Sawtooth"),
+                
+                checkboxInput("showSawtooth", "Show sawtooth pattern", value = FALSE),
+                
+                conditionalPanel(
+                  condition = "input.showSawtooth",
+                  colourpicker::colourInput("sawtoothColor", "Sawtooth line colour", value = "red"),
+                  sliderInput("sawtoothWeight", "Sawtooth line weight", min = 0.5, max = 3, value = 2, step = 0.1)
+                )
+              ),
+              
+              tabPanel(
+                title = "Web and chunk",
+                value = "webchunk",
+                
+                div(class = "settings-section-title", "Web and chunk analysis"),
+                
+                checkboxInput("showWebChunk", "Show web and chunk patterns", value = FALSE),
+                numericInput("minMoves", "Minimum moves", value = 3, min = 2),
+                numericInput("maxMoves", "Maximum moves", value = 8, min = 3),
+                numericInput("minConnectionPercentage", "Minimum connection %", value = 50, min = 0, max = 100),
+                numericInput("maxConnectionPercentage", "Maximum connection %", value = 100, min = 0, max = 100),
+                
+                actionButton("runWebChunk", "Run analysis", class = "btn-primary", style = "width: 100%; margin-bottom: 15px;"),
+                
+                conditionalPanel(
+                  condition = "input.showWebChunk && input.runWebChunk > 0",
+                  
+                  div(class = "settings-section-title", "Master Styling"),
+                  checkboxInput("globalChunkStyle", "Apply master style to all chunks", value = TRUE),
+                  colourpicker::colourInput("webChunkGlobalColor", "Master colour", value = "green"),
+                  sliderInput("webChunkGlobalWeight", "Master line weight", min = 0.5, max = 5, value = 2, step = 0.1),
+                  
+                  hr(),
+                  div(class = "settings-section-title", "Identified Chunks"),
+                  uiOutput("webChunkResultsUI")
+                )
+              ),
+              
+              tabPanel(
+                title = "Archiograph",
+                value = "archio",
+                
+                div(class = "settings-section-title", "Archiograph"),
+                
+                checkboxInput("showArchiograph", "Show archiograph", value = FALSE),
+                
+                conditionalPanel(
+                  condition = "input.showArchiograph",
+                  selectInput("archiographColumn", "Categorical column", choices = NULL),
+                  verbatimTextOutput("numFactorsOutput"),
+                  uiOutput("colorPickersUI"),
+                  sliderInput("archiographWeight", "Archiograph line weight", min = 0.5, max = 5, value = 1, step = 0.1),
+                  sliderInput("yarcScale", "Archiograph vertical scaling", min = 0, max = 3, value = 1, step = 0.01)
+                )
+              ),
+              
+              tabPanel(
+                title = "Trace",
+                value = "trace",
+                
+                # ---> NEW: Quick Import Action Button <---
+                div(class = "settings-section-title", "Quick Action"),
+                actionButton(
+                  "importCmToTrace", 
+                  "Import Active CM Moves", 
+                  class = "btn-primary", 
+                  style = "width: 100%; margin-bottom: 15px; font-size: 0.82rem;"
+                ),
+                
+                div(class = "settings-section-title", "Trace Forward"),
+                checkboxInput("showTraceForward", "Trace forward links", value = FALSE),
+                conditionalPanel(
+                  condition = "input.showTraceForward",
+                  selectizeInput("traceForwardMoves", "Select origin moves", choices = NULL, multiple = TRUE),
+                  colourpicker::colourInput("traceForwardColor", "Trace colour", value = "darkorange"),
+                  sliderInput("traceForwardWeight", "Line weight", min = 0.5, max = 5, value = 2, step = 0.1)
+                ),
+                
+                div(class = "settings-section-title", "Trace Backward"),
+                checkboxInput("showTraceBackward", "Trace backward links", value = FALSE),
+                conditionalPanel(
+                  condition = "input.showTraceBackward",
+                  selectizeInput("traceBackwardMoves", "Select origin moves", choices = NULL, multiple = TRUE),
+                  colourpicker::colourInput("traceBackwardColor", "Trace colour", value = "purple"),
+                  sliderInput("traceBackwardWeight", "Line weight", min = 0.5, max = 5, value = 2, step = 0.1)
+                )
+              ),
+              
+              tabPanel(
+                title = "Custom patterns",
+                value = "custom",
+                
+                div(class = "settings-section-title", "Custom patterns"),
+                
+                actionButton("addPattern", "Add new pattern", class = "btn-primary"),
+                br(),
+                br(),
+                uiOutput("customPatternsUI")
+              ),
+              
+              tabPanel(
+                title = "Export",
+                value = "export",
+                
+                div(class = "settings-section-title", "Export"),
+                
+                div(
+                  class = "control-pair",
+                  numericInput("pdfWidth", "PDF width (mm)", value = 297, min = 1),
+                  numericInput("pdfHeight", "PDF height (mm)", value = 210, min = 1)
+                ),
+                
+                # ---> NEW: Export Scale adjustment <---
+                sliderInput("pdfScale", "Element scaling (increase to make lines thinner in pdf)", min = 0.5, max = 4, value = 1.5, step = 0.1),
+                
+                downloadButton("downloadPlot", "Download plot as PDF", class = "btn-primary")
+              )
+            )
+          )
+        ),
+        
+        div(
+          class = "plot-holder",
+          
+          div(
+            class = "plot-holder-header",
+            div(class = "plot-title", "Linkograph")
+          ),
+          
+          div(
+            class = "plot-holder-body",
+            style = "position: relative;", # <--- NEW: Tells the button to float relative to this container
+            
+            plotOutput(
+              "interactivePlot", 
+              height = "100%",
+              dblclick = "plot_dblclick",
+              brush = brushOpts(
+                id = "plot_brush",
+                resetOnNew = TRUE
+              )
+            ),
+            
+            # ---> NEW: Floating Fit to Viewer Button <---
+            actionButton(
+              "resetView", 
+              label = NULL, # Or "Fit to Viewer" if you prefer text over just the icon
+              icon = icon("expand"),
+              title = "Fit to Viewer",
+              style = "position: absolute; bottom: 15px; right: 15px; opacity: 0.8; background-color: white; box-shadow: 0px 2px 5px rgba(0,0,0,0.2); border: none; z-index: 10;"
+            )
+          )
+        )
+      )
+    )
+  ),
+  
+  nav_panel(
+    "Link Span",
+    div(
+      class = "table-page",
+      card(
+        class = "plot-card",
+        card_header("Link span table"),
+        card_body(reactableOutput("linkSpanTable"))
+      )
+    )
+  ),
+  
+  nav_panel(
+    "Move Classification",
+    div(
+      class = "table-page",
+      layout_sidebar(
+        sidebar = sidebar(
+          width = 320,
+          card(
+            class = "control-card",
+            card_header("Classification settings"),
+            card_body(
+              # ---> NEW: Multi-select dropdown for variables <---
+              selectizeInput(
+                "quantGroupVars",
+                "Group data by (select one or more):",
+                choices = NULL,
+                multiple = TRUE
+              ),
+              # ---> NEW: Dedicated download button <---
+              downloadButton(
+                "downloadClassOutputs",
+                "Download all outputs as Excel",
+                class = "btn-primary"
+              )
+            )
+          )
+        ),
+        card(
+          class = "plot-card",
+          card_header("Move classification outputs"),
+          card_body(
+            tabsetPanel(
+              tabPanel("Descriptive Statistics", reactableOutput("descriptiveStatisticsTable")),
+              tabPanel("Inter/Intra Links", reactableOutput("interIntraLinksTable")),
+              tabPanel("Direction Counts", reactableOutput("moveDirectionCountsTable")),
+              tabPanel("Move Classification", reactableOutput("moveDirectionClassificationTable")),
+              tabPanel("Direction by Variable", reactableOutput("moveDirectionByVariableTable")),
+              tabPanel("Directed Matrices", reactableOutput("directedLinkCountsTable")),
+              tabPanel("Undirected Matrices", reactableOutput("undirectedLinkCountsTable"))
+            )
+          )
+        )
+      )
+    )
+  ),
+  
+  nav_panel(
+    "Critical Moves",
+    div(
+      class = "table-page",
+      layout_sidebar(
+        sidebar = sidebar(
+          width = 320,
+          card(
+            class = "control-card",
+            card_header("Critical move settings"),
+            card_body(
+              selectizeInput(
+                "cmGroupVars",
+                "Group data by (select one or more):",
+                choices = NULL,
+                multiple = TRUE
+              ),
+              numericInput(
+                "selectedCmThreshold",
+                "Selected directional CM threshold",
+                value = 2,
+                min = 1,
+                step = 1
+              ),
+              downloadButton(
+                "downloadQuantOutputs",
+                "Download all outputs as Excel",
+                class = "btn-primary"
+              )
+            )
+          )
+        ),
+        card(
+          class = "plot-card",
+          card_header("Directional critical move outputs"),
+          card_body(
+            tabsetPanel(
+              tabPanel("Threshold List", reactableOutput("cmThresholdsTable")),
+              tabPanel("Ranking List", reactableOutput("cmRankingTable")),
+              tabPanel("CM Move Counts", reactableOutput("cmMoveCountsTable")),
+              tabPanel("CM Counts by Variable", reactableOutput("cmCountsByVariableTable"))
+            )
+          )
+        )
+      )
+    )
+  ),
+  
+  nav_spacer(),
+  
+  nav_item(
+    tags$div(
+      style = "font-size: 0.75rem; color: #5B6770; line-height: 1.3; text-align: right; margin-top: 4px;",
+      tags$strong("Centre for the Advancement of Technology Education Research"), tags$br(),
+      "Developed by ",
+      tags$a(
+        href = "https://www.cater-network.com", 
+        target = "_blank", 
+        style = "color: var(--cater-midnight); text-decoration: none; font-weight: 700;",
+        "Nicolaas Blom & Jeffrey Buckley"
+      )
+    )
   )
 )
 
 
+`%||%` <- function(x, y) {
+  if (is.null(x)) y else x
+}
+
+empty_table <- function(message = "No eligible variables were found for this output.") {
+  tibble::tibble(Note = message)
+}
+
+##### Function: import and structure linkography data #####
+
+# Helper function to beautifully format column names for UI and Excel
+clean_df_names <- function(df) {
+  if(is.data.frame(df)) {
+    new_names <- names(df)
+    # Expand shorthand prefixes
+    new_names <- stringr::str_replace_all(new_names, "^n_", "Number of ")
+    new_names <- stringr::str_replace_all(new_names, "^percent_", "Percentage of ")
+    new_names <- stringr::str_replace_all(new_names, "^cm_", "CM ")
+    # Replace underscores with spaces and Title Case the words
+    new_names <- stringr::str_replace_all(new_names, "_", " ")
+    new_names <- stringr::str_to_title(new_names)
+    # Fix specific acronyms/grammar altered by Title Case
+    new_names <- stringr::str_replace_all(new_names, "\\bCm\\b", "CM")
+    new_names <- stringr::str_replace_all(new_names, "\\bOf\\b", "of")
+    names(df) <- new_names
+  }
+  return(df)
+}
+
+read_linkography <- function(file, sheet = 1) {
+  
+  # Import raw Excel file
+  raw_data <- suppressMessages(readxl::read_excel(file, sheet = sheet))
+  
+  # ---> NEW: Robust Move Column Finder <---
+  # Uses regex to find "move", "Move", "moves", or "Moves" (case-insensitive)
+  move_col_idx <- grep("(?i)^moves?$", names(raw_data))
+  
+  if (length(move_col_idx) > 0) {
+    names(raw_data)[move_col_idx[1]] <- "move" # Standardize the matched column
+  } else {
+    names(raw_data)[1] <- "move" # Fallback: assume the first column is the move column
+  }
+  
+  # Identify unnamed columns created by readxl, e.g., ...2, ...3, etc.
+  link_cols <- names(raw_data)[stringr::str_detect(names(raw_data), "^\\.\\.\\.[0-9]+$")]
+  
+  if (length(link_cols) == 0) {
+    stop("No unnamed link columns were detected. Check that the link columns in Excel have no column names.")
+  }
+  
+  # One row per move, keeping ALL other named categorical variables automatically
+  moves <- raw_data %>%
+    dplyr::select(-dplyr::all_of(link_cols)) %>%
+    dplyr::mutate(
+      move = as.integer(move)
+      # ---> REMOVED: Hardcoded participant mutations are completely gone
+    )
+  
+  # One row per link
+  links <- raw_data %>%
+    dplyr::select(move, dplyr::all_of(link_cols)) %>%
+    tidyr::pivot_longer(
+      cols = dplyr::all_of(link_cols),
+      names_to = "link_column",
+      values_to = "target_move",
+      values_drop_na = TRUE
+    ) %>%
+    dplyr::transmute(
+      source_move = as.integer(move),
+      target_move = as.integer(target_move)
+      # ---> REMOVED: Hardcoded source_participant is completely gone
+    )
+  
+  # Basic checks
+  missing_targets <- setdiff(unique(links$target_move), moves$move)
+  
+  if (length(missing_targets) > 0) {
+    warning(
+      "Some target moves in the link columns are not present in the move column: ",
+      paste(missing_targets, collapse = ", ")
+    )
+  }
+  
+  forward_or_self_links <- links %>%
+    dplyr::filter(target_move >= source_move)
+  
+  if (nrow(forward_or_self_links) > 0) {
+    warning("Some links point to the same move or to a later move. Check `forward_or_self_links`.")
+  }
+  
+  duplicate_links <- links %>%
+    dplyr::count(source_move, target_move) %>%
+    dplyr::filter(n > 1)
+  
+  if (nrow(duplicate_links) > 0) {
+    warning("Some source-target links appear more than once. Check `duplicate_links`.")
+  }
+  
+  return(
+    list(
+      raw_data = raw_data,
+      moves = moves,
+      links = links,
+      link_cols = link_cols,
+      missing_targets = missing_targets,
+      forward_or_self_links = forward_or_self_links,
+      duplicate_links = duplicate_links
+    )
+  )
+}
+
+##### Function: inter/intra links for selected move-level variables #####
+
+summarise_inter_intra_by_variables <- function(moves, links, variables) {
+  
+  # Check that all requested variables exist in moves
+  missing_variables <- setdiff(variables, names(moves))
+  
+  if (length(missing_variables) > 0) {
+    stop(
+      "The following variables are not in the moves dataset: ",
+      paste(missing_variables, collapse = ", ")
+    )
+  }
+  
+  # Function to process one variable
+  process_variable <- function(variable_name) {
+    
+    # Count number of moves in each category of the selected variable
+    category_move_counts <- moves %>%
+      dplyr::transmute(
+        source_category = as.character(.data[[variable_name]])
+      ) %>%
+      dplyr::filter(!is.na(source_category)) %>%
+      dplyr::count(
+        source_category,
+        name = "n_moves"
+      )
+    
+    source_values <- moves %>%
+      dplyr::select(
+        source_move = move,
+        source_category = dplyr::all_of(variable_name)
+      ) %>%
+      dplyr::mutate(
+        source_category = as.character(source_category)
+      )
+    
+    target_values <- moves %>%
+      dplyr::select(
+        target_move = move,
+        target_category = dplyr::all_of(variable_name)
+      ) %>%
+      dplyr::mutate(
+        target_category = as.character(target_category)
+      )
+    
+    links %>%
+      dplyr::select(source_move, target_move) %>%
+      dplyr::left_join(source_values, by = "source_move") %>%
+      dplyr::left_join(target_values, by = "target_move") %>%
+      dplyr::mutate(
+        variable = variable_name,
+        link_type = dplyr::case_when(
+          is.na(source_category) | is.na(target_category) ~ NA_character_,
+          source_category == target_category ~ "Intra",
+          source_category != target_category ~ "Inter"
+        )
+      ) %>%
+      dplyr::filter(!is.na(link_type)) %>%
+      dplyr::count(
+        variable,
+        source_category,
+        link_type,
+        name = "n_links"
+      ) %>%
+      tidyr::complete(
+        variable,
+        source_category = category_move_counts$source_category,
+        link_type = c("Intra", "Inter"),
+        fill = list(n_links = 0)
+      ) %>%
+      tidyr::pivot_wider(
+        names_from = link_type,
+        values_from = n_links,
+        values_fill = 0
+      ) %>%
+      dplyr::left_join(
+        category_move_counts,
+        by = "source_category"
+      )
+  }
+  
+  # Run over all selected variables and combine
+  output <- lapply(variables, process_variable) %>%
+    dplyr::bind_rows() %>%
+    dplyr::mutate(
+      total_links = Intra + Inter,
+      
+      # Link index for each source category
+      link_index = dplyr::case_when(
+        n_moves > 0 ~ total_links / n_moves,
+        TRUE ~ NA_real_
+      ),
+      
+      # Within-category percentages
+      intra_percentage = dplyr::case_when(
+        total_links > 0 ~ Intra / total_links * 100,
+        TRUE ~ NA_real_
+      ),
+      inter_percentage = dplyr::case_when(
+        total_links > 0 ~ Inter / total_links * 100,
+        TRUE ~ NA_real_
+      )
+    ) %>%
+    dplyr::group_by(variable) %>%
+    dplyr::mutate(
+      total_intra_links_for_variable = sum(Intra, na.rm = TRUE),
+      total_inter_links_for_variable = sum(Inter, na.rm = TRUE),
+      
+      # Contribution to all intra/inter links within each variable
+      percentage_of_all_intra_links = dplyr::case_when(
+        total_intra_links_for_variable > 0 ~ Intra / total_intra_links_for_variable * 100,
+        TRUE ~ NA_real_
+      ),
+      percentage_of_all_inter_links = dplyr::case_when(
+        total_inter_links_for_variable > 0 ~ Inter / total_inter_links_for_variable * 100,
+        TRUE ~ NA_real_
+      )
+    ) %>%
+    dplyr::ungroup() %>%
+    dplyr::rename(
+      category = source_category,
+      intra_links = Intra,
+      inter_links = Inter
+    ) %>%
+    dplyr::select(
+      variable,
+      category,
+      n_moves,
+      link_index,
+      intra_links,
+      inter_links,
+      total_links,
+      intra_percentage,
+      inter_percentage,
+      percentage_of_all_intra_links,
+      percentage_of_all_inter_links
+    )
+  
+  return(output)
+}
+
+##### Function: classify moves by link direction #####
+
+classify_move_direction <- function(moves, links, raw_data = NULL) {
+  
+  move_type_levels <- c(
+    "Unidirectional forward move",
+    "Unidirectional backward move",
+    "Bidirectional move",
+    "Orphan move"
+  )
+  
+  move_direction_classification <- moves %>%
+    dplyr::select(move) %>%
+    
+    # Links made by this move to previous/lower-numbered moves
+    dplyr::left_join(
+      links %>%
+        dplyr::filter(target_move < source_move) %>%
+        dplyr::count(source_move, name = "backward_links") %>%
+        dplyr::rename(move = source_move),
+      by = "move"
+    ) %>%
+    
+    # Links received from later/higher-numbered moves
+    dplyr::left_join(
+      links %>%
+        dplyr::filter(source_move > target_move) %>%
+        dplyr::count(target_move, name = "forward_links") %>%
+        dplyr::rename(move = target_move),
+      by = "move"
+    ) %>%
+    
+    dplyr::mutate(
+      backward_links = tidyr::replace_na(backward_links, 0L),
+      forward_links = tidyr::replace_na(forward_links, 0L),
+      
+      move_type = dplyr::case_when(
+        forward_links > 0 & backward_links == 0 ~ "Unidirectional forward move",
+        backward_links > 0 & forward_links == 0 ~ "Unidirectional backward move",
+        forward_links > 0 & backward_links > 0 ~ "Bidirectional move",
+        forward_links == 0 & backward_links == 0 ~ "Orphan move"
+      ),
+      
+      move_type = factor(
+        move_type,
+        levels = move_type_levels
+      )
+    )
+  
+  move_direction_counts <- move_direction_classification %>%
+    dplyr::count(
+      move_type,
+      name = "n_moves",
+      .drop = FALSE
+    ) %>%
+    dplyr::mutate(
+      percentage = n_moves / sum(n_moves) * 100
+    )
+  
+  moves_with_direction_classification <- moves %>%
+    dplyr::left_join(
+      move_direction_classification %>%
+        dplyr::select(
+          move,
+          backward_links,
+          forward_links,
+          move_type
+        ),
+      by = "move"
+    )
+  
+  if (!is.null(raw_data)) {
+    raw_data_with_direction_classification <- raw_data %>%
+      dplyr::left_join(
+        move_direction_classification %>%
+          dplyr::select(
+            move,
+            backward_links,
+            forward_links,
+            move_type
+          ),
+        by = "move"
+      )
+  } else {
+    raw_data_with_direction_classification <- NULL
+  }
+  
+  return(
+    list(
+      move_direction_classification = move_direction_classification,
+      move_direction_counts = move_direction_counts,
+      moves_with_direction_classification = moves_with_direction_classification,
+      raw_data_with_direction_classification = raw_data_with_direction_classification
+    )
+  )
+}
+
+##### Function: move direction counts for selected move-level variables #####
+
+summarise_move_direction_by_variables <- function(moves_with_direction_classification,
+                                                  variables,
+                                                  missing_label = "Missing") {
+  
+  # Check that all requested variables exist
+  missing_variables <- setdiff(
+    variables,
+    names(moves_with_direction_classification)
+  )
+  
+  if (length(missing_variables) > 0) {
+    stop(
+      "The following variables are not in the moves dataset: ",
+      paste(missing_variables, collapse = ", ")
+    )
+  }
+  
+  move_type_levels <- c(
+    "Unidirectional forward move",
+    "Unidirectional backward move",
+    "Bidirectional move",
+    "Orphan move"
+  )
+  
+  # Function to process one variable
+  process_variable <- function(variable_name) {
+    
+    moves_with_direction_classification %>%
+      dplyr::select(
+        move,
+        category = dplyr::all_of(variable_name),
+        move_type
+      ) %>%
+      dplyr::mutate(
+        variable = variable_name,
+        category = as.character(category),
+        category = tidyr::replace_na(category, missing_label),
+        move_type = as.character(move_type),
+        move_type = factor(
+          move_type,
+          levels = move_type_levels
+        )
+      ) %>%
+      dplyr::count(
+        variable,
+        category,
+        move_type,
+        name = "n_moves",
+        .drop = FALSE
+      ) %>%
+      tidyr::complete(
+        variable,
+        category,
+        move_type = factor(move_type_levels, levels = move_type_levels),
+        fill = list(n_moves = 0)
+      )
+  }
+  
+  output_long <- lapply(variables, process_variable) %>%
+    dplyr::bind_rows() %>%
+    dplyr::group_by(variable, category) %>%
+    dplyr::mutate(
+      total_moves = sum(n_moves),
+      percentage = dplyr::case_when(
+        total_moves > 0 ~ n_moves / total_moves * 100,
+        TRUE ~ NA_real_
+      )
+    ) %>%
+    dplyr::ungroup()
+  
+  output_wide <- output_long %>%
+    dplyr::mutate(
+      move_type_clean = dplyr::case_when(
+        move_type == "Unidirectional forward move" ~ "unidirectional_forward",
+        move_type == "Unidirectional backward move" ~ "unidirectional_backward",
+        move_type == "Bidirectional move" ~ "bidirectional",
+        move_type == "Orphan move" ~ "orphan"
+      )
+    ) %>%
+    dplyr::select(
+      variable,
+      category,
+      move_type_clean,
+      n_moves,
+      percentage
+    ) %>%
+    tidyr::pivot_wider(
+      names_from = move_type_clean,
+      values_from = c(n_moves, percentage),
+      values_fill = list(
+        n_moves = 0,
+        percentage = 0
+      )
+    ) %>%
+    dplyr::mutate(
+      total_moves =
+        n_moves_unidirectional_forward +
+        n_moves_unidirectional_backward +
+        n_moves_bidirectional +
+        n_moves_orphan
+    ) %>%
+    dplyr::rename(
+      percent_moves_unidirectional_forward = percentage_unidirectional_forward,
+      percent_moves_unidirectional_backward = percentage_unidirectional_backward,
+      percent_moves_bidirectional = percentage_bidirectional,
+      percent_moves_orphan = percentage_orphan
+    ) %>%
+    dplyr::select(
+      variable,
+      category,
+      n_moves_unidirectional_forward,
+      percent_moves_unidirectional_forward,
+      n_moves_unidirectional_backward,
+      percent_moves_unidirectional_backward,
+      n_moves_bidirectional,
+      percent_moves_bidirectional,
+      n_moves_orphan,
+      percent_moves_orphan,
+      total_moves
+    )
+  
+  return(
+    list(
+      move_direction_by_variable_long = output_long,
+      move_direction_by_variable_wide = output_wide
+    )
+  )
+}
+
+##### Function: explore directional critical move thresholds at original move level #####
+
+explore_directional_cm_thresholds <- function(moves_with_direction_classification,
+                                              percentages = 10:15,
+                                              round_method = "round_half_up") {
+  
+  required_columns <- c("move", "forward_links", "backward_links")
+  
+  missing_required_columns <- setdiff(
+    required_columns,
+    names(moves_with_direction_classification)
+  )
+  
+  if (length(missing_required_columns) > 0) {
+    stop(
+      "moves_with_direction_classification is missing these required columns: ",
+      paste(missing_required_columns, collapse = ", ")
+    )
+  }
+  
+  # One row per original move
+  move_level_data <- moves_with_direction_classification %>%
+    dplyr::select(
+      move,
+      forward_links,
+      backward_links
+    )
+  
+  n_original_moves <- nrow(move_level_data)
+  
+  # Two directional scores per original move:
+  # one forward score and one backward score
+  directional_scores <- move_level_data %>%
+    tidyr::pivot_longer(
+      cols = c(forward_links, backward_links),
+      names_to = "direction",
+      values_to = "directional_links"
+    ) %>%
+    dplyr::mutate(
+      direction = dplyr::case_when(
+        direction == "forward_links" ~ "Forward",
+        direction == "backward_links" ~ "Backward"
+      )
+    ) %>%
+    dplyr::arrange(
+      dplyr::desc(directional_links),
+      move,
+      direction
+    ) %>%
+    dplyr::mutate(
+      directional_rank = dplyr::row_number()
+    )
+  
+  get_n_selected <- function(percentage) {
+    
+    # Important: percentage is based on the number of original moves,
+    # not the number of directional scores.
+    raw_n <- n_original_moves * percentage / 100
+    
+    n_selected <- dplyr::case_when(
+      round_method == "ceiling" ~ ceiling(raw_n),
+      round_method == "floor" ~ floor(raw_n),
+      round_method == "round_half_up" ~ floor(raw_n + 0.5),
+      TRUE ~ floor(raw_n + 0.5)
+    )
+    
+    n_selected <- max(n_selected, 1)
+    n_selected <- min(n_selected, nrow(directional_scores))
+    
+    return(n_selected)
+  }
+  
+  process_percentage <- function(percentage) {
+    
+    n_selected <- get_n_selected(percentage)
+    
+    threshold <- directional_scores$directional_links[n_selected]
+    
+    move_classification <- move_level_data %>%
+      dplyr::mutate(
+        is_cm_forward = forward_links >= threshold,
+        is_cm_backward = backward_links >= threshold,
+        is_cm_bidirectional = is_cm_forward & is_cm_backward,
+        is_cm_any_direction = is_cm_forward | is_cm_backward
+      )
+    
+    tibble::tibble(
+      total_number_of_moves = n_original_moves,
+      target_percentage = percentage,
+      target_number_of_critical_moves = n_selected,
+      critical_move_threshold = threshold,
+      
+      actual_qualifying_scores = 
+        sum(directional_scores$directional_links >= threshold),
+      
+      n_cm_forward_moves =
+        sum(move_classification$is_cm_forward),
+      
+      n_cm_backward_moves =
+        sum(move_classification$is_cm_backward),
+      
+      n_cm_bidirectional_moves =
+        sum(move_classification$is_cm_bidirectional),
+      
+      n_unique_cm_moves =
+        sum(move_classification$is_cm_any_direction),
+      
+      percent_unique_cm_moves =
+        n_unique_cm_moves / n_original_moves * 100
+    )
+  }
+  
+  directional_cm_thresholds <- lapply(
+    percentages,
+    process_percentage
+  ) %>%
+    dplyr::bind_rows()
+  
+  return(
+    list(
+      directional_scores = directional_scores,
+      directional_cm_thresholds = directional_cm_thresholds
+    )
+  )
+}
+
+##### Function: summarise directional critical moves overall #####
+
+summarise_directional_critical_moves_overall <- function(moves_with_direction_classification,
+                                                         critical_move_thresholds,
+                                                         empty_move_label = "") {
+  
+  required_columns <- c("move", "forward_links", "backward_links")
+  
+  missing_required_columns <- setdiff(
+    required_columns,
+    names(moves_with_direction_classification)
+  )
+  
+  if (length(missing_required_columns) > 0) {
+    stop(
+      "moves_with_direction_classification is missing these required columns: ",
+      paste(missing_required_columns, collapse = ", ")
+    )
+  }
+  
+  cm_type_levels <- c(
+    "Exclusive: CM Forward Only",
+    "Exclusive: CM Backward Only",
+    "Exclusive: CM Bidirectional",
+    "Inclusive: CM Forward Total",
+    "Inclusive: CM Backward Total"
+  )
+  
+  format_move_numbers <- function(x) {
+    x <- sort(unique(x))
+    
+    if (length(x) == 0) {
+      return(empty_move_label)
+    } else {
+      return(paste(x, collapse = ", "))
+    }
+  }
+  
+  directional_critical_moves <- moves_with_direction_classification %>%
+    tidyr::crossing(
+      critical_move_threshold = critical_move_thresholds
+    ) %>%
+    dplyr::mutate(
+      is_cm_forward = forward_links >= critical_move_threshold,
+      is_cm_backward = backward_links >= critical_move_threshold,
+      is_cm_bidirectional = is_cm_forward & is_cm_backward,
+      is_cm_any_direction = is_cm_forward | is_cm_backward,
+      
+      cm_type = dplyr::case_when(
+        is_cm_forward & is_cm_backward ~ "CM bidirectional",
+        is_cm_forward & !is_cm_backward ~ "CM forward only",
+        !is_cm_forward & is_cm_backward ~ "CM backward only",
+        TRUE ~ "Not CM"
+      )
+    )
+  
+  directional_critical_move_counts <- directional_critical_moves %>%
+    dplyr::group_by(critical_move_threshold) %>%
+    dplyr::summarise(
+      total_critical_moves = sum(is_cm_any_direction, na.rm = TRUE),
+      
+      n_cm_forward_only = sum(is_cm_forward & !is_cm_backward, na.rm = TRUE),
+      n_cm_backward_only = sum(!is_cm_forward & is_cm_backward, na.rm = TRUE),
+      n_cm_bidirectional = sum(is_cm_bidirectional, na.rm = TRUE),
+      n_cm_forward_total = sum(is_cm_forward, na.rm = TRUE),
+      n_cm_backward_total = sum(is_cm_backward, na.rm = TRUE),
+      
+      moves_cm_forward_only = format_move_numbers(
+        move[is_cm_forward & !is_cm_backward]
+      ),
+      moves_cm_backward_only = format_move_numbers(
+        move[!is_cm_forward & is_cm_backward]
+      ),
+      moves_cm_bidirectional = format_move_numbers(
+        move[is_cm_bidirectional]
+      ),
+      moves_cm_forward_total = format_move_numbers(
+        move[is_cm_forward]
+      ),
+      moves_cm_backward_total = format_move_numbers(
+        move[is_cm_backward]
+      ),
+      
+      .groups = "drop"
+    )
+  
+  counts_long <- directional_critical_move_counts %>%
+    dplyr::select(
+      critical_move_threshold,
+      total_critical_moves,
+      n_cm_forward_only,
+      n_cm_backward_only,
+      n_cm_bidirectional,
+      n_cm_forward_total,
+      n_cm_backward_total
+    ) %>%
+    tidyr::pivot_longer(
+      cols = dplyr::starts_with("n_cm_"),
+      names_to = "cm_type_clean",
+      values_to = "n_critical_moves"
+    )
+  
+  moves_long <- directional_critical_move_counts %>%
+    dplyr::select(
+      critical_move_threshold,
+      moves_cm_forward_only,
+      moves_cm_backward_only,
+      moves_cm_bidirectional,
+      moves_cm_forward_total,
+      moves_cm_backward_total
+    ) %>%
+    tidyr::pivot_longer(
+      cols = dplyr::starts_with("moves_cm_"),
+      names_to = "cm_type_clean",
+      values_to = "move_numbers"
+    ) %>%
+    dplyr::mutate(
+      cm_type_clean = stringr::str_replace(
+        cm_type_clean,
+        "^moves_",
+        "n_"
+      )
+    )
+  
+  directional_critical_move_counts <- counts_long %>%
+    dplyr::left_join(
+      moves_long,
+      by = c("critical_move_threshold", "cm_type_clean")
+    ) %>%
+    dplyr::mutate(
+      cm_type = dplyr::case_when(
+        cm_type_clean == "n_cm_forward_only" ~ "Exclusive: CM Forward Only",
+        cm_type_clean == "n_cm_backward_only" ~ "Exclusive: CM Backward Only",
+        cm_type_clean == "n_cm_bidirectional" ~ "Exclusive: CM Bidirectional",
+        cm_type_clean == "n_cm_forward_total" ~ "Inclusive: CM Forward Total",
+        cm_type_clean == "n_cm_backward_total" ~ "Inclusive: CM Backward Total"
+      ),
+      cm_type = factor(cm_type, levels = cm_type_levels),
+      percent_critical_moves = dplyr::case_when(
+        total_critical_moves > 0 ~ n_critical_moves / total_critical_moves * 100,
+        TRUE ~ 0
+      )
+    ) %>%
+    dplyr::arrange(
+      critical_move_threshold,
+      cm_type
+    ) %>%
+    dplyr::select(
+      critical_move_threshold,
+      total_critical_moves,
+      cm_type,
+      n_critical_moves,
+      percent_critical_moves,
+      move_numbers
+    )
+  
+  return(
+    list(
+      directional_critical_moves = directional_critical_moves,
+      directional_critical_move_counts = directional_critical_move_counts
+    )
+  )
+}
+##### Function: summarise directional critical moves by selected variables #####
+
+summarise_directional_critical_moves_by_variables <- function(moves_with_direction_classification,
+                                                              variables,
+                                                              critical_move_thresholds,
+                                                              missing_label = "Missing",
+                                                              empty_move_label = "") {
+  
+  required_columns <- c("move", "forward_links", "backward_links")
+  
+  missing_required_columns <- setdiff(
+    required_columns,
+    names(moves_with_direction_classification)
+  )
+  
+  if (length(missing_required_columns) > 0) {
+    stop(
+      "moves_with_direction_classification is missing these required columns: ",
+      paste(missing_required_columns, collapse = ", ")
+    )
+  }
+  
+  missing_variables <- setdiff(
+    variables,
+    names(moves_with_direction_classification)
+  )
+  
+  if (length(missing_variables) > 0) {
+    stop(
+      "The following variables are not in the moves dataset: ",
+      paste(missing_variables, collapse = ", ")
+    )
+  }
+  
+  cm_type_levels <- c(
+    "Exclusive: CM Forward Only",
+    "Exclusive: CM Backward Only",
+    "Exclusive: CM Bidirectional",
+    "Inclusive: CM Forward Total",
+    "Inclusive: CM Backward Total"
+  )
+  
+  format_move_numbers <- function(x) {
+    x <- sort(unique(x))
+    
+    if (length(x) == 0) {
+      return(empty_move_label)
+    } else {
+      return(paste(x, collapse = ", "))
+    }
+  }
+  
+  process_variable <- function(variable_name) {
+    
+    classified_moves <- moves_with_direction_classification %>%
+      dplyr::select(
+        move,
+        category = dplyr::all_of(variable_name),
+        forward_links,
+        backward_links
+      ) %>%
+      dplyr::mutate(
+        variable = variable_name,
+        category = as.character(category),
+        category = tidyr::replace_na(category, missing_label)
+      ) %>%
+      tidyr::crossing(
+        critical_move_threshold = critical_move_thresholds
+      ) %>%
+      dplyr::mutate(
+        is_cm_forward = forward_links >= critical_move_threshold,
+        is_cm_backward = backward_links >= critical_move_threshold,
+        is_cm_bidirectional = is_cm_forward & is_cm_backward,
+        is_cm_any_direction = is_cm_forward | is_cm_backward,
+        
+        cm_type = dplyr::case_when(
+          is_cm_forward & is_cm_backward ~ "CM bidirectional",
+          is_cm_forward & !is_cm_backward ~ "CM forward only",
+          !is_cm_forward & is_cm_backward ~ "CM backward only",
+          TRUE ~ "Not CM"
+        )
+      )
+    
+    summary_wide <- classified_moves %>%
+      dplyr::group_by(
+        critical_move_threshold,
+        variable,
+        category
+      ) %>%
+      dplyr::summarise(
+        n_total_moves_in_category = dplyr::n(),
+        total_critical_moves = sum(is_cm_any_direction, na.rm = TRUE),
+        
+        n_cm_forward_only = sum(is_cm_forward & !is_cm_backward, na.rm = TRUE),
+        n_cm_backward_only = sum(!is_cm_forward & is_cm_backward, na.rm = TRUE),
+        n_cm_bidirectional = sum(is_cm_bidirectional, na.rm = TRUE),
+        n_cm_forward_total = sum(is_cm_forward, na.rm = TRUE),
+        n_cm_backward_total = sum(is_cm_backward, na.rm = TRUE),
+        
+        moves_cm_forward_only = format_move_numbers(
+          move[is_cm_forward & !is_cm_backward]
+        ),
+        moves_cm_backward_only = format_move_numbers(
+          move[!is_cm_forward & is_cm_backward]
+        ),
+        moves_cm_bidirectional = format_move_numbers(
+          move[is_cm_bidirectional]
+        ),
+        moves_cm_forward_total = format_move_numbers(
+          move[is_cm_forward]
+        ),
+        moves_cm_backward_total = format_move_numbers(
+          move[is_cm_backward]
+        ),
+        
+        .groups = "drop"
+      )
+    
+    counts_long <- summary_wide %>%
+      dplyr::select(
+        critical_move_threshold,
+        variable,
+        category,
+        n_total_moves_in_category,
+        total_critical_moves,
+        n_cm_forward_only,
+        n_cm_backward_only,
+        n_cm_bidirectional,
+        n_cm_forward_total,
+        n_cm_backward_total
+      ) %>%
+      tidyr::pivot_longer(
+        cols = dplyr::starts_with("n_cm_"),
+        names_to = "cm_type_clean",
+        values_to = "n_critical_moves"
+      )
+    
+    moves_long <- summary_wide %>%
+      dplyr::select(
+        critical_move_threshold,
+        variable,
+        category,
+        moves_cm_forward_only,
+        moves_cm_backward_only,
+        moves_cm_bidirectional,
+        moves_cm_forward_total,
+        moves_cm_backward_total
+      ) %>%
+      tidyr::pivot_longer(
+        cols = dplyr::starts_with("moves_cm_"),
+        names_to = "cm_type_clean",
+        values_to = "move_numbers"
+      ) %>%
+      dplyr::mutate(
+        cm_type_clean = stringr::str_replace(
+          cm_type_clean,
+          "^moves_",
+          "n_"
+        )
+      )
+    
+    counts_long %>%
+      dplyr::left_join(
+        moves_long,
+        by = c(
+          "critical_move_threshold",
+          "variable",
+          "category",
+          "cm_type_clean"
+        )
+      ) %>%
+      dplyr::mutate(
+        cm_type = dplyr::case_when(
+          cm_type_clean == "n_cm_forward_only" ~ "Exclusive: CM Forward Only",
+          cm_type_clean == "n_cm_backward_only" ~ "Exclusive: CM Backward Only",
+          cm_type_clean == "n_cm_bidirectional" ~ "Exclusive: CM Bidirectional",
+          cm_type_clean == "n_cm_forward_total" ~ "Inclusive: CM Forward Total",
+          cm_type_clean == "n_cm_backward_total" ~ "Inclusive: CM Backward Total"
+        ),
+        cm_type = factor(cm_type, levels = cm_type_levels),
+        percent_critical_moves = dplyr::case_when(
+          total_critical_moves > 0 ~ n_critical_moves / total_critical_moves * 100,
+          TRUE ~ 0
+        )
+      ) %>%
+      dplyr::arrange(
+        critical_move_threshold,
+        variable,
+        category,
+        cm_type
+      ) %>%
+      dplyr::select(
+        critical_move_threshold,
+        variable,
+        category,
+        n_total_moves_in_category,
+        total_critical_moves,
+        cm_type,
+        n_critical_moves,
+        percent_critical_moves,
+        move_numbers
+      )
+  }
+  
+  directional_critical_moves_by_variable <- lapply(
+    variables,
+    process_variable
+  ) %>%
+    dplyr::bind_rows()
+  
+  return(directional_critical_moves_by_variable)
+}
+##### Function: link matrices for selected move-level variables #####
+
+summarise_links_between_categories <- function(moves,
+                                               links,
+                                               variables,
+                                               missing_label = "Missing") {
+  
+  # Check selected variables exist
+  missing_variables <- setdiff(variables, names(moves))
+  
+  if (length(missing_variables) > 0) {
+    stop(
+      "The following variables are not in the moves dataset: ",
+      paste(missing_variables, collapse = ", ")
+    )
+  }
+  
+  process_variable <- function(variable_name) {
+    
+    source_values <- moves %>%
+      dplyr::select(
+        source_move = move,
+        source_category = dplyr::all_of(variable_name)
+      ) %>%
+      dplyr::mutate(
+        source_category = as.character(source_category),
+        source_category = tidyr::replace_na(source_category, missing_label)
+      )
+    
+    target_values <- moves %>%
+      dplyr::select(
+        target_move = move,
+        target_category = dplyr::all_of(variable_name)
+      ) %>%
+      dplyr::mutate(
+        target_category = as.character(target_category),
+        target_category = tidyr::replace_na(target_category, missing_label)
+      )
+    
+    category_levels <- moves %>%
+      dplyr::pull(dplyr::all_of(variable_name)) %>%
+      as.character() %>%
+      tidyr::replace_na(missing_label) %>%
+      unique() %>%
+      sort()
+    
+    observed_counts <- links %>%
+      dplyr::select(source_move, target_move) %>%
+      dplyr::left_join(source_values, by = "source_move") %>%
+      dplyr::left_join(target_values, by = "target_move") %>%
+      dplyr::count(
+        source_category,
+        target_category,
+        name = "n_links"
+      )
+    
+    full_counts <- tidyr::expand_grid(
+      variable = variable_name,
+      source_category = category_levels,
+      target_category = category_levels
+    ) %>%
+      dplyr::left_join(
+        observed_counts,
+        by = c("source_category", "target_category")
+      ) %>%
+      dplyr::mutate(
+        n_links = tidyr::replace_na(n_links, 0L)
+      )
+    
+    matrix_wide <- full_counts %>%
+      dplyr::select(
+        variable,
+        source_category,
+        target_category,
+        n_links
+      ) %>%
+      dplyr::mutate(
+        target_category = paste0("target_", target_category)
+      ) %>%
+      tidyr::pivot_wider(
+        names_from = target_category,
+        values_from = n_links,
+        values_fill = 0
+      ) %>%
+      dplyr::arrange(source_category)
+    
+    return(
+      list(
+        long = full_counts,
+        wide = matrix_wide
+      )
+    )
+  }
+  
+  outputs <- lapply(variables, process_variable)
+  names(outputs) <- variables
+  
+  link_counts_between_categories_long <- lapply(outputs, `[[`, "long") %>%
+    dplyr::bind_rows()
+  
+  link_matrices_by_variable <- lapply(outputs, `[[`, "wide")
+  
+  return(
+    list(
+      link_counts_between_categories_long = link_counts_between_categories_long,
+      link_matrices_by_variable = link_matrices_by_variable
+    )
+  )
+}
+
+##### Function: undirected link matrices for selected move-level variables #####
+
+summarise_undirected_links_between_categories <- function(moves,
+                                                          links,
+                                                          variables,
+                                                          missing_label = "Missing") {
+  
+  # Check selected variables exist
+  missing_variables <- setdiff(variables, names(moves))
+  
+  if (length(missing_variables) > 0) {
+    stop(
+      "The following variables are not in the moves dataset: ",
+      paste(missing_variables, collapse = ", ")
+    )
+  }
+  
+  process_variable <- function(variable_name) {
+    
+    category_values <- moves %>%
+      dplyr::select(
+        move,
+        category = dplyr::all_of(variable_name)
+      ) %>%
+      dplyr::mutate(
+        category = as.character(category),
+        category = tidyr::replace_na(category, missing_label)
+      )
+    
+    category_levels <- category_values %>%
+      dplyr::pull(category) %>%
+      unique() %>%
+      sort()
+    
+    links_with_categories <- links %>%
+      dplyr::select(source_move, target_move) %>%
+      dplyr::left_join(
+        category_values %>%
+          dplyr::rename(
+            source_move = move,
+            source_category = category
+          ),
+        by = "source_move"
+      ) %>%
+      dplyr::left_join(
+        category_values %>%
+          dplyr::rename(
+            target_move = move,
+            target_category = category
+          ),
+        by = "target_move"
+      ) %>%
+      dplyr::mutate(
+        source_index = match(source_category, category_levels),
+        target_index = match(target_category, category_levels),
+        
+        row_index = pmin(source_index, target_index),
+        column_index = pmax(source_index, target_index),
+        
+        row_category = category_levels[row_index],
+        column_category = category_levels[column_index]
+      )
+    
+    observed_counts <- links_with_categories %>%
+      dplyr::count(
+        row_category,
+        column_category,
+        name = "n_links"
+      )
+    
+    full_matrix_long <- tidyr::expand_grid(
+      row_index = seq_along(category_levels),
+      column_index = seq_along(category_levels)
+    ) %>%
+      dplyr::mutate(
+        variable = variable_name,
+        row_category = category_levels[row_index],
+        column_category = category_levels[column_index],
+        valid_upper_triangle = row_index <= column_index
+      ) %>%
+      dplyr::left_join(
+        observed_counts,
+        by = c("row_category", "column_category")
+      ) %>%
+      dplyr::mutate(
+        n_links = dplyr::case_when(
+          valid_upper_triangle & is.na(n_links) ~ 0L,
+          !valid_upper_triangle ~ NA_integer_,
+          TRUE ~ n_links
+        )
+      ) %>%
+      dplyr::select(
+        variable,
+        row_category,
+        column_category,
+        n_links
+      )
+    
+    matrix_wide <- full_matrix_long %>%
+      tidyr::pivot_wider(
+        names_from = column_category,
+        values_from = n_links
+      ) %>%
+      dplyr::arrange(row_category)
+    
+    return(
+      list(
+        long = full_matrix_long,
+        wide = matrix_wide
+      )
+    )
+  }
+  
+  outputs <- lapply(variables, process_variable)
+  names(outputs) <- variables
+  
+  undirected_link_counts_long <- lapply(outputs, `[[`, "long") %>%
+    dplyr::bind_rows()
+  
+  undirected_link_matrices_by_variable <- lapply(outputs, `[[`, "wide")
+  
+  return(
+    list(
+      undirected_link_counts_long = undirected_link_counts_long,
+      undirected_link_matrices_by_variable = undirected_link_matrices_by_variable
+    )
+  )
+}
+##### Function: write a named list of tibbles to one Excel sheet #####
+
+write_list_of_tables_to_sheet <- function(wb,
+                                          sheet_name,
+                                          table_list,
+                                          start_row = 1,
+                                          start_col = 1) {
+  
+  # Add sheet if it does not already exist
+  if (!sheet_name %in% names(wb)) {
+    addWorksheet(wb, sheet_name)
+  }
+  
+  title_style <- createStyle(
+    textDecoration = "bold",
+    fontSize = 12
+  )
+  
+  current_row <- start_row
+  
+  for (table_name in names(table_list)) {
+    
+    current_table <- table_list[[table_name]]
+    
+    # Write table title
+    writeData(
+      wb,
+      sheet = sheet_name,
+      x = table_name,
+      startRow = current_row,
+      startCol = start_col
+    )
+    
+    addStyle(
+      wb,
+      sheet = sheet_name,
+      style = title_style,
+      rows = current_row,
+      cols = start_col,
+      gridExpand = TRUE
+    )
+    
+    # Write table
+    writeData(
+      wb,
+      sheet = sheet_name,
+      x = current_table,
+      startRow = current_row + 1,
+      startCol = start_col
+    )
+    
+    # Move down: title row + header row + data rows + gap
+    current_row <- current_row + nrow(current_table) + 4
+  }
+  
+  setColWidths(
+    wb,
+    sheet = sheet_name,
+    cols = 1:50,
+    widths = "auto"
+  )
+}
 
 
 # Define server logic
 server <- function(input, output, session) {
   
+  switch_settings_panel <- function(panel, button_id) {
+    updateTabsetPanel(session, "settingsPanel", selected = panel)
+    
+    shinyjs::removeClass(selector = ".tool-button", class = "active")
+    shinyjs::addClass(id = button_id, class = "active")
+  }
+  
+  session$onFlushed(function() {
+    shinyjs::addClass(id = "tool_data", class = "active")
+  }, once = TRUE)
+  
+  observeEvent(input$tool_data, {
+    switch_settings_panel("data", "tool_data")
+  })
+  
+  observeEvent(input$tool_base, {
+    switch_settings_panel("base", "tool_base")
+  })
+  
+  observeEvent(input$tool_labels, {
+    switch_settings_panel("labels", "tool_labels")
+  })
+  
+  observeEvent(input$tool_overlays, {
+    switch_settings_panel("overlays", "tool_overlays")
+  })
+  
+  observeEvent(input$tool_webchunk, {
+    switch_settings_panel("webchunk", "tool_webchunk")
+  })
+  
+  observeEvent(input$tool_archio, {
+    switch_settings_panel("archio", "tool_archio")
+  })
+  
+  observeEvent(input$tool_custom, {
+    switch_settings_panel("custom", "tool_custom")
+  })
+  
+  observeEvent(input$tool_export, {
+    switch_settings_panel("export", "tool_export")
+  })
+  
+  observeEvent(input$tool_trace, {
+    switch_settings_panel("trace", "tool_trace")
+  })
+  
+  # Reset the plot view to fit everything
+  # Toggle Auto-Scaling and Fit to Viewer
+  observeEvent(input$resetView, {
+    # Check if autoscaling is currently on or off
+    current_state <- input$autoYAxis
+    
+    # Flip the checkbox to the opposite state
+    updateCheckboxInput(session, "autoYAxis", value = !current_state)
+    
+    # If we are turning it ON, also snap the X-axis zoom to full width 
+    # so the entire plot perfectly fits the viewer
+    if (!current_state) {
+      req(processed_data())
+      max_move <- max(processed_data()$moves_df$move, na.rm = TRUE)
+      updateSliderInput(session, "plotCropRange", value = c(1, max_move))
+    }
+  })
+  
+  # Handle Mouse-Driven Zooming (Brush + Double Click)
+  observeEvent(input$plot_dblclick, {
+    brush <- input$plot_brush
+    
+    if (!is.null(brush)) {
+      # 1. User highlighted a box and double-clicked. Let's zoom!
+      
+      # Turn OFF Auto Y-Axis so our manual zoom takes priority
+      updateCheckboxInput(session, "autoYAxis", value = FALSE)
+      
+      # Update the X-axis (Crop Range slider) based on the brush box
+      # We round to integers because moves are discrete numbers
+      updateSliderInput(session, "plotCropRange", 
+                        value = c(round(brush$xmin), round(brush$xmax)))
+      
+      # Update the Y-axis (Vertical range slider) based on the brush box
+      updateSliderInput(session, "yAxisRange", 
+                        value = c(brush$ymin, brush$ymax))
+      
+    } else {
+      # 2. User double-clicked WITHOUT drawing a box. Reset the view!
+      
+      # Turn Auto Y-Axis back ON
+      updateCheckboxInput(session, "autoYAxis", value = TRUE)
+      
+      # Reset the X-axis to the full span of the data
+      req(processed_data())
+      max_move <- max(processed_data()$moves_df$move, na.rm = TRUE)
+      updateSliderInput(session, "plotCropRange", value = c(1, max_move))
+    }
+  })
+  
+  # Automatically import current Critical Move selections into Trace inputs
+  observeEvent(input$importCmToTrace, {
+    req(processed_data())
+    pd <- processed_data()
+    
+    # Grab the cleaned critical move count table
+    cm_counts <- pd$directional_critical_move_counts
+    all_moves <- pd$moves_df$move
+    
+    # Helper to pull the comma-separated string, split it, and clean it up
+    extract_move_vector <- function(type_label) {
+      move_str <- cm_counts %>%
+        dplyr::filter(`CM Type` == type_label) %>%
+        dplyr::pull(`Move Numbers`)
+      
+      if (length(move_str) == 0 || is.na(move_str) || move_str == "") {
+        return(character(0))
+      }
+      
+      # Split by comma and trim any whitespace
+      parsed <- unlist(stringr::str_split(move_str, ",\\s*"))
+      return(parsed)
+    }
+    
+    # Extract clean vectors for both directions
+    fwd_cm_moves <- extract_move_vector("Inclusive: CM Forward Total")
+    bwd_cm_moves <- extract_move_vector("Inclusive: CM Backward Total")
+    
+    # Overwrite the dropdowns with the imported vectors
+    updateSelectizeInput(session, "traceForwardMoves", choices = all_moves, selected = fwd_cm_moves, server = TRUE)
+    updateSelectizeInput(session, "traceBackwardMoves", choices = all_moves, selected = bwd_cm_moves, server = TRUE)
+    
+    # Optional Quality of Life: Auto-turn on the checkboxes if they are unchecked
+    if (!input$showTraceForward && length(fwd_cm_moves) > 0) updateCheckboxInput(session, "showTraceForward", value = TRUE)
+    if (!input$showTraceBackward && length(bwd_cm_moves) > 0) updateCheckboxInput(session, "showTraceBackward", value = TRUE)
+  })
+  
   # Reactive expression to read and process the uploaded data
   processed_data <- reactive({
     req(input$file)
-    mydata <- read_excel(input$file$datapath)
     
-    ##### Create list of moves #####
-    edge_list <- mydata %>%
-      pivot_longer(cols = starts_with("..."), names_to = "connection", values_to = "to") %>%
-      select(-connection) %>%
-      filter(!is.na(to)) %>%
-      rename(from = move)
+    linkography_data <- read_linkography(input$file$datapath)
     
-    # Calculate the Link Index
-    link_index <- nrow(edge_list) / nrow(mydata)
+    moves <- linkography_data$moves
+    links <- linkography_data$links
+    raw_data <- linkography_data$raw_data
     
-    # Calculate total number of moves
+    ##### Basic summary #####
     
-    total_moves <- nrow(mydata)
+    linkography_summary <- tibble::tibble(
+      n_moves = nrow(moves),
+      n_links = nrow(links),
+      first_move = min(moves$move, na.rm = TRUE),
+      last_move = max(moves$move, na.rm = TRUE),
+      n_link_columns = length(linkography_data$link_cols)
+    )
     
-    # Create a moves_df with horizontal positions for linkograph (x and y axis positions)
-    moves_df <- data.frame(move = unique(c(mydata$move)))
-    moves_df <- moves_df %>% arrange(move) %>% mutate(x = 1:n(), y = 0) # Assign x positions and y=0 for all
+    descriptive_statistics <- tibble::tibble(
+      Statistic = c(
+        "Number of moves",
+        "Number of links",
+        "Link index"
+      ),
+      Value = c(
+        nrow(moves),
+        nrow(links),
+        nrow(links) / nrow(moves)
+      )
+    ) %>%
+      dplyr::mutate(
+        Value = dplyr::case_when(
+          Statistic == "Link index" ~ sprintf("%.2f", Value),
+          TRUE ~ sprintf("%.0f", Value)
+        )
+      )
     
-    # Prepare the connections with geometric calculations
+    ##### Plot-compatible objects #####
+    
+    edge_list <- links %>%
+      dplyr::transmute(
+        from = source_move,
+        to = target_move
+      )
+    
+    link_index <- nrow(edge_list) / nrow(moves)
+    total_moves <- nrow(moves)
+    
+    moves_df <- moves %>%
+      dplyr::distinct(move) %>%
+      dplyr::arrange(move) %>%
+      dplyr::mutate(
+        x = dplyr::row_number(),
+        y = 0
+      )
+    
     connections_df <- edge_list %>%
-      left_join(moves_df, by = c("from" = "move")) %>%
-      rename(from_x = x) %>%
-      left_join(moves_df, by = c("to" = "move")) %>%
-      rename(to_x = x) %>%
-      mutate(distance = abs(from_x - to_x), # Calculate horizontal distance
-             mid_x = (from_x + to_x) / 2, # Calculate midpoint for x
-             mid_y = -distance) # The negative sign ensures the projection is downward
+      dplyr::left_join(
+        moves_df %>% dplyr::select(move, x),
+        by = c("from" = "move")
+      ) %>%
+      dplyr::rename(from_x = x) %>%
+      dplyr::left_join(
+        moves_df %>% dplyr::select(move, x),
+        by = c("to" = "move")
+      ) %>%
+      dplyr::rename(to_x = x) %>%
+      dplyr::mutate(
+        distance = abs(from_x - to_x),
+        mid_x = (from_x + to_x) / 2,
+        mid_y = -distance
+      )
     
+    ##### Move direction classification #####
     
-    # Identify Unidirectional Forward Moves
+    move_direction_output <- classify_move_direction(
+      moves = moves,
+      links = links,
+      raw_data = raw_data
+    )
+    
+    move_direction_classification <- move_direction_output$move_direction_classification
+    move_direction_counts <- move_direction_output$move_direction_counts
+    moves_with_direction_classification <- move_direction_output$moves_with_direction_classification
+    raw_data_with_direction_classification <- move_direction_output$raw_data_with_direction_classification
+    
+    uni_forward_moves <- move_direction_classification %>%
+      dplyr::filter(move_type == "Unidirectional forward move") %>%
+      dplyr::pull(move)
+    
+    uni_backward_moves <- move_direction_classification %>%
+      dplyr::filter(move_type == "Unidirectional backward move") %>%
+      dplyr::pull(move)
+    
+    bidirectional_moves <- move_direction_classification %>%
+      dplyr::filter(move_type == "Bidirectional move") %>%
+      dplyr::pull(move)
+    
+    ##### Sawtooth identification for plot overlay #####
+    
     move_connections_df <- lapply(unique(c(moves_df$move)), function(move) {
       connected_moves <- unique(c(
         connections_df$from[connections_df$to == move],
@@ -195,240 +2510,166 @@ server <- function(input, output, session) {
       ))
       connected_moves <- setdiff(connected_moves, move)
       data.frame(move = move, connected_moves = I(list(connected_moves)))
-    }) %>% bind_rows()
+    }) %>%
+      dplyr::bind_rows() %>%
+      dplyr::rowwise() %>%
+      dplyr::mutate(connected_values = list(unlist(connected_moves))) %>%
+      dplyr::ungroup()
     
-    move_connections_df <- move_connections_df %>%
-      rowwise() %>%
-      mutate(connected_values = list(unlist(connected_moves)))
-    
-    uni_forward_moves <- move_connections_df %>%
-      rowwise() %>%
-      filter(length(connected_values) > 0) %>%
-      filter(all(connected_values > move)) %>%
-      pull(move)
-    
-    # Identify Unidirectional Backward Moves
-    uni_backward_moves <- move_connections_df %>%
-      rowwise() %>%
-      filter(length(connected_values) > 0) %>%
-      filter(all(connected_values < move)) %>%
-      pull(move)
-    
-    # Identify Bidirectional Moves
-    bidirectional_moves <- move_connections_df %>%
-      rowwise() %>%
-      filter(length(connected_values) > 0) %>%
-      filter(any(connected_values > move) & any(connected_values < move)) %>%
-      pull(move)
-    
-    # Identify Orphan Moves
-    orphan_moves <- move_connections_df %>%
-      rowwise() %>%
-      filter(length(connected_values) == 0) %>%
-      pull(move)
-    
-    # Identify Critical Moves Type 1
-    
-    critical_moves_analysis_df <- move_connections_df
-    critical_moves_analysis_df$category <- NA
-    # Assign the categories based on the moves identified earlier
-    critical_moves_analysis_df$category[critical_moves_analysis_df$move %in% uni_forward_moves] <- "Unidirectional Forward"
-    critical_moves_analysis_df$category[critical_moves_analysis_df$move %in% uni_backward_moves] <- "Unidirectional Backward"
-    critical_moves_analysis_df$category[critical_moves_analysis_df$move %in% bidirectional_moves] <- "Bidirectional"
-    critical_moves_analysis_df$category[critical_moves_analysis_df$move %in% orphan_moves] <- "Orphan"
-    
-    critical_moves_analysis_df$total_connections <- lengths(critical_moves_analysis_df$connected_values)
-    
-    # Join with moves_df to get the category information
-    critical_moves_analysis_df <- critical_moves_analysis_df %>%
-      left_join(moves_df, by = "move")
-    
-    top_10_percent_cutoff_overall <- quantile(critical_moves_analysis_df$total_connections, 0.9)
-    critical_moves_analysis_df$top_10_percent_overall <- critical_moves_analysis_df$total_connections >= top_10_percent_cutoff_overall
-    
-    top_11_percent_cutoff_overall <- quantile(critical_moves_analysis_df$total_connections, 0.89)
-    critical_moves_analysis_df$top_11_percent_overall <- critical_moves_analysis_df$total_connections >= top_11_percent_cutoff_overall
-    
-    top_12_percent_cutoff_overall <- quantile(critical_moves_analysis_df$total_connections, 0.88)
-    critical_moves_analysis_df$top_12_percent_overall <- critical_moves_analysis_df$total_connections >= top_12_percent_cutoff_overall
-    
-    # Filter the dataframe to get only the rows for "Unidirectional Forward" moves
-    uni_forward_data <- critical_moves_analysis_df[critical_moves_analysis_df$category == "Unidirectional Forward", ]
-    # Calculate the cutoffs for Unidirectional Forward
-    top_10_percent_cutoff_uni_forward <- quantile(uni_forward_data$total_connections, 0.9)
-    top_11_percent_cutoff_uni_forward <- quantile(uni_forward_data$total_connections, 0.89)
-    top_12_percent_cutoff_uni_forward <- quantile(uni_forward_data$total_connections, 0.88)
-    uni_forward_data$top_10_percent_category <- uni_forward_data$total_connections >= top_10_percent_cutoff_uni_forward
-    uni_forward_data$top_11_percent_category <- uni_forward_data$total_connections >= top_11_percent_cutoff_uni_forward
-    uni_forward_data$top_12_percent_category <- uni_forward_data$total_connections >= top_12_percent_cutoff_uni_forward
-    
-    # Filter the dataframe to get only the rows for "Unidirectional Backward" moves
-    uni_backward_data <- critical_moves_analysis_df[critical_moves_analysis_df$category == "Unidirectional Backward", ]
-    # Calculate the cutoffs for Unidirectional Backward
-    top_10_percent_cutoff_uni_backward <- quantile(uni_backward_data$total_connections, 0.9)
-    top_11_percent_cutoff_uni_backward <- quantile(uni_backward_data$total_connections, 0.89)
-    top_12_percent_cutoff_uni_backward <- quantile(uni_backward_data$total_connections, 0.88)
-    uni_backward_data$top_10_percent_category <- uni_backward_data$total_connections >= top_10_percent_cutoff_uni_backward
-    uni_backward_data$top_11_percent_category <- uni_backward_data$total_connections >= top_11_percent_cutoff_uni_backward
-    uni_backward_data$top_12_percent_category <- uni_backward_data$total_connections >= top_12_percent_cutoff_uni_backward
-    
-    # Filter the dataframe to get only the rows for "Bidirectional" moves
-    bidirectional_data <- critical_moves_analysis_df[critical_moves_analysis_df$category == "Bidirectional", ]
-    # Calculate the cutoffs for Bidirectional
-    top_10_percent_cutoff_bidirectional <- quantile(bidirectional_data$total_connections, 0.9)
-    top_11_percent_cutoff_bidirectional <- quantile(bidirectional_data$total_connections, 0.89)
-    top_12_percent_cutoff_bidirectional <- quantile(bidirectional_data$total_connections, 0.88)
-    # Create new columns indicating whether each move is within the top 10%, 11%, or 12%
-    bidirectional_data$top_10_percent_category <- bidirectional_data$total_connections >= top_10_percent_cutoff_bidirectional
-    bidirectional_data$top_11_percent_category <- bidirectional_data$total_connections >= top_11_percent_cutoff_bidirectional
-    bidirectional_data$top_12_percent_category <- bidirectional_data$total_connections >= top_12_percent_cutoff_bidirectional
-    
-    # Filter the dataframe to get only the rows for "Orphan" moves
-    orphan_data <- critical_moves_analysis_df[critical_moves_analysis_df$category == "Orphan", ]
-    orphan_data$top_10_percent_category <- NA
-    orphan_data$top_11_percent_category <- NA
-    orphan_data$top_12_percent_category <- NA
-    
-    critical_moves_analysis_df <- rbind(uni_forward_data, uni_backward_data, bidirectional_data, orphan_data)
-    
-    critical_moves_analysis_df <- critical_moves_analysis_df[order(as.numeric(critical_moves_analysis_df$move)), ]
-
-    # Critical moves Type 2
-    
-    critical_move_a <- floor(nrow(mydata) / 10)
-    critical_move_b <- critical_move_a + 1
-    critical_move_c <- critical_move_a + 2
-    
-    ## Real Critical Moves Table
-    
-    criticalMoveSummaryTable <- reactive({
-      req(processed_data())
-      
-      connections_df <- processed_data()$connections_df
-      all_moves <- processed_data()$moves_df$move
-      
-      # Get all links from both perspectives
-      forward_df <- connections_df %>%
-        filter(as.numeric(to) > as.numeric(from)) %>%
-        select(move = from) %>%
-        bind_rows(
-          connections_df %>%
-            filter(as.numeric(from) > as.numeric(to)) %>%
-            select(move = to)
-        )
-      
-      backward_df <- connections_df %>%
-        filter(as.numeric(to) < as.numeric(from)) %>%
-        select(move = from) %>%
-        bind_rows(
-          connections_df %>%
-            filter(as.numeric(from) < as.numeric(to)) %>%
-            select(move = to)
-        )
-      
-      forward_counts <- forward_df %>%
-        count(move, name = "Forward Links")
-      
-      backward_counts <- backward_df %>%
-        count(move, name = "Backward Links")
-      
-      # Build summary table
-      summary_df <- tibble(Move = all_moves) %>%
-        left_join(forward_counts, by = c("Move" = "move")) %>%
-        left_join(backward_counts, by = c("Move" = "move")) %>%
-        mutate(
-          `Forward Links` = replace_na(`Forward Links`, 0),
-          `Backward Links` = replace_na(`Backward Links`, 0),
-          
-          # Critical Forward Moves
-          `CM&gt;A` = ifelse(`Forward Links` >= processed_data()$critical_move_a, "Yes", "No"),
-          `CM&gt;B` = ifelse(`Forward Links` >= processed_data()$critical_move_b, "Yes", "No"),
-          `CM&gt;C` = ifelse(`Forward Links` >= processed_data()$critical_move_c, "Yes", "No"),
-          
-          # Critical Backward Moves
-          `CM&lt;A` = ifelse(`Backward Links` >= processed_data()$critical_move_a, "Yes", "No"),
-          `CM&lt;B` = ifelse(`Backward Links` >= processed_data()$critical_move_b, "Yes", "No"),
-          `CM&lt;C` = ifelse(`Backward Links` >= processed_data()$critical_move_c, "Yes", "No")
-        )
-      
-      summary_df
-    })
-
-    
-    output$criticalMoveSummaryTable <- renderDT({
-      datatable(
-        criticalMoveSummaryTable(),
-        options = list(
-          pageLength = 10,
-          dom = 'tip',
-          columnDefs = list(list(className = 'dt-center', targets = "_all"))
-        ),
-        rownames = FALSE,
-        escape = FALSE
-      )
-    })
-    
-    
-   
-    
-    
-    
-    
-    ##### Sawtooth Identification (Runs Automatically) #####
     sawtooth_patterns <- identify_sawtooth_patterns(move_connections_df)
-    sawtooth_sequence <- unlist(sawtooth_patterns)  # Assuming only one sequence for simplicity
+    sawtooth_sequence <- unlist(sawtooth_patterns)
     
-    # Mark connections based on their role in the sawtooth pattern
-    connections_df <- connections_df %>%
-      mutate(
-        sawtooth_role = case_when(
-          from %in% sawtooth_sequence & to %in% sawtooth_sequence & from == min(sawtooth_sequence) ~ "Forward from First",
-          from %in% sawtooth_sequence & to %in% sawtooth_sequence & to == max(sawtooth_sequence) ~ "Backward to Last",
-          from %in% sawtooth_sequence & to %in% sawtooth_sequence ~ "Middle Moves",
-          TRUE ~ "Not in Sawtooth"
+    if (length(sawtooth_sequence) == 0) {
+      connections_df <- connections_df %>%
+        dplyr::mutate(sawtooth_role = "Not in Sawtooth")
+    } else {
+      connections_df <- connections_df %>%
+        dplyr::mutate(
+          sawtooth_role = dplyr::case_when(
+            from %in% sawtooth_sequence & to %in% sawtooth_sequence & from == min(sawtooth_sequence) ~ "Forward from First",
+            from %in% sawtooth_sequence & to %in% sawtooth_sequence & to == max(sawtooth_sequence) ~ "Backward to Last",
+            from %in% sawtooth_sequence & to %in% sawtooth_sequence ~ "Middle Moves",
+            TRUE ~ "Not in Sawtooth"
+          )
         )
-      )
+    }
     
-    # Create the link span table
-    link_span_moves_df <- connections_df %>% select(from, to, distance)
-    unique_moves <- unique(c(mydata$move))
-    distance_df <- expand.grid(from = unique_moves, to = unique_moves)
-    distance_df <- distance_df %>%
-      left_join(link_span_moves_df, by = c("from", "to"))
+    ##### Link span table, retained from the original app #####
+    
+    link_span_moves_df <- connections_df %>%
+      dplyr::select(from, to, distance)
+    
+    unique_moves <- unique(c(moves$move))
+    
+    distance_df <- expand.grid(
+      from = unique_moves,
+      to = unique_moves
+    ) %>%
+      dplyr::left_join(
+        link_span_moves_df,
+        by = c("from", "to")
+      )
     
     distance_table <- distance_df %>%
-      spread(key = to, value = distance)
+      tidyr::spread(key = to, value = distance)
     
     distance_table[is.na(distance_table)] <- ""
     colnames(distance_table)[which(names(distance_table) == "from")] <- "Move"
     
-    # Create the move classification table
-    move_classification <- critical_moves_analysis_df %>%
-      mutate(
-        `Move Type` = case_when(
-          move %in% uni_forward_moves ~ "Unidirectional Forward",
-          move %in% uni_backward_moves ~ "Unidirectional Backward",
-          move %in% bidirectional_moves ~ "Bidirectional",
-          move %in% orphan_moves ~ "Orphan",
-          TRUE ~ "Neutral"
-        )
-      ) %>%
-      select(Move = move,
-             `Move Type`,
-             `Top 10% Overall` = top_10_percent_overall,
-             `Top 11% Overall` = top_11_percent_overall,
-             `Top 12% Overall` = top_12_percent_overall,
-             `Top 10% Category` = top_10_percent_category,
-             `Top 11% Category` = top_11_percent_category,
-             `Top 12% Category` = top_12_percent_category)
+    ##### Variable-based outputs from the analysis script #####
     
-    archiograph_moves_df <- mydata
+    exclude_cols <- c("move", "from", "to", "x", "y")
     
-    # Return processed data frames and the link index as a list
+    # ---> FIXED: We calculate everything behind the scenes instantly. 
+    # This completely severs the infinite loop!
+    analysis_variables <- setdiff(names(moves), exclude_cols)
+    
+    if (length(analysis_variables) > 0) {
+      inter_intra_links_by_variable <- summarise_inter_intra_by_variables(
+        moves = moves,
+        links = links,
+        variables = analysis_variables
+      )
+      
+      move_direction_by_variable_output <- summarise_move_direction_by_variables(
+        moves_with_direction_classification = moves_with_direction_classification,
+        variables = analysis_variables
+      )
+      
+      move_direction_by_variable_long <- move_direction_by_variable_output$move_direction_by_variable_long
+      move_direction_by_variable_wide <- move_direction_by_variable_output$move_direction_by_variable_wide
+      
+      link_matrix_output <- summarise_links_between_categories(
+        moves = moves,
+        links = links,
+        variables = analysis_variables
+      )
+      
+      link_counts_between_categories_long <- link_matrix_output$link_counts_between_categories_long
+      link_matrices_by_variable <- link_matrix_output$link_matrices_by_variable
+      
+      undirected_link_matrix_output <- summarise_undirected_links_between_categories(
+        moves = moves,
+        links = links,
+        variables = analysis_variables
+      )
+      
+      undirected_link_counts_long <- undirected_link_matrix_output$undirected_link_counts_long
+      undirected_link_matrices_by_variable <- undirected_link_matrix_output$undirected_link_matrices_by_variable
+    } else {
+      inter_intra_links_by_variable <- empty_table()
+      move_direction_by_variable_long <- empty_table()
+      move_direction_by_variable_wide <- empty_table()
+      link_counts_between_categories_long <- empty_table()
+      link_matrices_by_variable <- list()
+      undirected_link_counts_long <- empty_table()
+      undirected_link_matrices_by_variable <- list()
+    }
+    
+    ##### Directional critical move outputs #####
+    
+    directional_cm_threshold_output <- explore_directional_cm_thresholds(
+      moves_with_direction_classification = moves_with_direction_classification,
+      percentages = 5:15,
+      round_method = "round_half_up"
+    )
+    
+    directional_scores <- directional_cm_threshold_output$directional_scores
+    directional_cm_thresholds <- directional_cm_threshold_output$directional_cm_thresholds
+    
+    selected_directional_cm_threshold <- input$selectedCmThreshold %||% 2
+    selected_directional_cm_threshold <- as.numeric(selected_directional_cm_threshold)
+    
+    if (is.na(selected_directional_cm_threshold) || selected_directional_cm_threshold < 1) {
+      selected_directional_cm_threshold <- 2
+    }
+    
+    directional_critical_move_output <- summarise_directional_critical_moves_overall(
+      moves_with_direction_classification = moves_with_direction_classification,
+      critical_move_thresholds = selected_directional_cm_threshold
+    )
+    
+    directional_critical_moves <- directional_critical_move_output$directional_critical_moves
+    directional_critical_move_counts <- directional_critical_move_output$directional_critical_move_counts
+    
+    if (length(analysis_variables) > 0) {
+      directional_critical_moves_by_variable <- summarise_directional_critical_moves_by_variables(
+        moves_with_direction_classification = moves_with_direction_classification,
+        variables = analysis_variables,
+        critical_move_thresholds = selected_directional_cm_threshold
+      )
+    } else {
+      directional_critical_moves_by_variable <- empty_table()
+    }
+    
+    # Compatibility values for older text outputs, if still present anywhere in the UI
+    critical_move_a <- floor(nrow(moves) / 10)
+    critical_move_b <- critical_move_a + 1
+    critical_move_c <- critical_move_a + 2
+    
+    ##### Final Cleanup for Presentation and Export #####
+    descriptive_statistics <- clean_df_names(descriptive_statistics)
+    inter_intra_links_by_variable <- clean_df_names(inter_intra_links_by_variable)
+    move_direction_counts <- clean_df_names(move_direction_counts)
+    moves_with_direction_classification <- clean_df_names(moves_with_direction_classification)
+    move_direction_by_variable_wide <- clean_df_names(move_direction_by_variable_wide)
+    link_counts_between_categories_long <- clean_df_names(link_counts_between_categories_long)
+    undirected_link_counts_long <- clean_df_names(undirected_link_counts_long)
+    directional_cm_thresholds <- clean_df_names(directional_cm_thresholds)
+    directional_scores <- clean_df_names(directional_scores)
+    directional_critical_move_counts <- clean_df_names(directional_critical_move_counts)
+    directional_critical_moves_by_variable <- clean_df_names(directional_critical_moves_by_variable)
+    
     list(
-      moves_df = moves_df, 
-      connections_df = connections_df, 
-      uni_forward_moves = uni_forward_moves, 
+      raw_data = raw_data,
+      moves = moves,
+      links = links,
+      linkography_summary = linkography_summary,
+      descriptive_statistics = descriptive_statistics,
+      analysis_variables = analysis_variables,
+      moves_df = moves_df,
+      connections_df = connections_df,
+      uni_forward_moves = uni_forward_moves,
       uni_backward_moves = uni_backward_moves,
       bidirectional_moves = bidirectional_moves,
       sawtooth_sequence = sawtooth_sequence,
@@ -438,9 +2679,26 @@ server <- function(input, output, session) {
       critical_move_b = critical_move_b,
       critical_move_c = critical_move_c,
       distance_table = distance_table,
-      move_classification = move_classification,
       edge_list = edge_list,
-      archiograph_moves_df = archiograph_moves_df
+      archiograph_moves_df = raw_data,
+      inter_intra_links_by_variable = inter_intra_links_by_variable,
+      move_direction_classification = move_direction_classification,
+      move_direction_counts = move_direction_counts,
+      moves_with_direction_classification = moves_with_direction_classification,
+      raw_data_with_direction_classification = raw_data_with_direction_classification,
+      move_direction_by_variable_long = move_direction_by_variable_long,
+      move_direction_by_variable_wide = move_direction_by_variable_wide,
+      directional_scores = directional_scores,
+      directional_cm_thresholds = directional_cm_thresholds,
+      selected_directional_cm_threshold = selected_directional_cm_threshold,
+      directional_critical_moves = directional_critical_moves,
+      directional_critical_move_counts = directional_critical_move_counts,
+      directional_critical_moves_by_variable = directional_critical_moves_by_variable,
+      link_counts_between_categories_long = link_counts_between_categories_long,
+      link_matrices_by_variable = link_matrices_by_variable,
+      undirected_link_counts_long = undirected_link_counts_long,
+      undirected_link_matrices_by_variable = undirected_link_matrices_by_variable,
+      move_classification = moves_with_direction_classification
     )
   })
   
@@ -466,6 +2724,31 @@ server <- function(input, output, session) {
     
     # Update the dropdown options in the UI
     updateSelectInput(session, "archiographColumn", choices = all_columns)
+  })
+  
+  # Update Trace drop-downs and Crop Slider with available moves
+  observe({
+    req(processed_data())
+    moves <- processed_data()$moves_df$move
+    max_move <- max(moves, na.rm = TRUE)
+    
+    # Update Trace menus
+    updateSelectizeInput(session, "traceForwardMoves", choices = moves, server = TRUE)
+    updateSelectizeInput(session, "traceBackwardMoves", choices = moves, server = TRUE)
+    
+    # Update Crop Slider to span the full dataset by default
+    updateSliderInput(session, "plotCropRange", max = max_move, value = c(1, max_move))
+  })
+  
+  # Update the Move Classification dropdown exactly ONCE when new data is uploaded
+  observeEvent(processed_data(), {
+    moves <- processed_data()$moves
+    exclude_cols <- c("move", "from", "to", "x", "y") 
+    cat_cols <- setdiff(names(moves), exclude_cols)
+    
+    # Load them instantly
+    updateSelectizeInput(session, "quantGroupVars", choices = cat_cols, selected = cat_cols)
+    updateSelectizeInput(session, "cmGroupVars", choices = cat_cols, selected = cat_cols) # <--- NEW
   })
   
   # Output the number of unique factors and dynamically generate color pickers
@@ -508,11 +2791,6 @@ server <- function(input, output, session) {
     do.call(tagList, picker_list)  # Combine all color pickers into a tagList
   })
   
-  
-  
-  
-  
-
   
   # Reactive expression to perform web and chunk analysis when the button is clicked
   web_chunk_data <- eventReactive(input$runWebChunk, {
@@ -587,46 +2865,276 @@ server <- function(input, output, session) {
     paste("CM<C:", processed_data()$critical_move_c)
   })
   
+  ##### New Reactable Builder Function #####
+  
+  # This helper function passes any extra arguments (`...`) directly into reactable
+  ##### New Reactable Builder Function #####
+  
+  # This helper function passes any extra arguments (`...`) directly into reactable
+  build_quant_table <- function(data, page_length = 20, ...) {
+    reactable(
+      data,
+      ...,
+      pagination = TRUE,
+      showPageSizeOptions = TRUE,                # <--- NEW: Turns on the dropdown
+      pageSizeOptions = c(10, 20, 50, 100, 500), # <--- NEW: Gives options up to 500 rows
+      defaultPageSize = page_length,
+      striped = TRUE,
+      highlight = TRUE,
+      compact = TRUE,
+      wrap = TRUE,      
+      resizable = TRUE, 
+      defaultColDef = colDef(
+        minWidth = 150  
+      ),
+      theme = reactableTheme(
+        # Header styling
+        headerStyle = list(
+          backgroundColor = "#0A4F57",
+          color = "#FFFFFF",
+          textTransform = "uppercase",
+          fontWeight = 850,
+          fontSize = "0.74rem",
+          letterSpacing = "0.055em",
+          borderBottom = "4px solid #06AED5",
+          padding = "11px 13px",
+          whiteSpace = "normal", 
+          wordBreak = "break-word", # <--- 2. Forces long column names with underscores to wrap!
+          lineHeight = "1.3"
+        ),
+        # Body styling
+        borderColor = "rgba(10, 79, 87, 0.08)",
+        stripedColor = "#FAFBFC",
+        highlightColor = "rgba(6, 174, 213, 0.08)",
+        cellPadding = "8px 13px",
+        style = list(
+          fontFamily = "Inter, system-ui, -apple-system, sans-serif",
+          fontSize = "0.88rem",
+          color = "#2d3436"
+        )
+      )
+    )
+  }
+  
   # Render the data summary table
-  output$dataSummary <- renderDT({
+  output$dataSummary <- renderReactable({
     req(processed_data())
-    datatable(processed_data()$moves_df, options = list(pageLength = 10))
+    build_quant_table(processed_data()$moves_df, page_length = 10)
   })
   
-  # Render the link span table on the Link Span tab
-  output$linkSpanTable <- renderDT({
+  # Render the link span table
+  output$linkSpanTable <- renderReactable({
     req(processed_data())
-    datatable(processed_data()$distance_table, rownames = FALSE, options = list(pageLength = nrow(processed_data()$distance_table))) %>%
-      formatStyle(
-        columns = names(processed_data()$distance_table),  # Apply to all columns
-        textAlign = 'center',  # Center all text
-        target = 'cell'  # Applies centering to the body cells
-      ) %>%
-      formatStyle(
-        columns = names(processed_data()$distance_table),  # Apply to all columns
-        textAlign = 'center',  # Center the headers
-        target = 'row'  # Applies centering to the header row
-      ) %>%
-      formatStyle(
-        'Move',  # Replace 'Move' with the actual name of your first column if different
-        fontWeight = 'bold'  # Make the first column bold
+    build_quant_table(
+      processed_data()$distance_table, 
+      page_length = 20,
+      # Pin the "Move" column to the left when scrolling horizontally!
+      columns = list(
+        Move = colDef(
+          style = list(fontWeight = "800", color = "#0A4F57", backgroundColor = "#F6F7F9"),
+          sticky = "left"
+        )
       )
+    )
   })
   
-  # Render the move classification table on the Move Classification tab
-  output$moveClassificationTable <- renderDT({
+  output$descriptiveStatisticsTable <- renderReactable({
     req(processed_data())
-    datatable(processed_data()$move_classification, rownames = FALSE, options = list(pageLength = 10)) %>%
-      formatStyle(
-        columns = "Move",  # Center the 'Move' column
-        textAlign = 'center',
-        fontWeight = 'bold'
-      ) %>%
-      formatStyle(
-        columns = "Move Type",  # Center the 'Move Type' column
-        textAlign = 'center'
-      )
+    build_quant_table(processed_data()$descriptive_statistics, page_length = 10)
   })
+  
+  output$interIntraLinksTable <- renderReactable({
+    req(processed_data(), input$quantGroupVars)
+    df <- processed_data()$inter_intra_links_by_variable
+    if ("Variable" %in% names(df)) df <- df[df$Variable %in% input$quantGroupVars, ]
+    build_quant_table(df, page_length = 20)
+  })
+  
+  output$moveDirectionCountsTable <- renderReactable({
+    req(processed_data())
+    build_quant_table(processed_data()$move_direction_counts, page_length = 10)
+  })
+  
+  output$moveDirectionClassificationTable <- renderReactable({
+    req(processed_data())
+    build_quant_table(processed_data()$moves_with_direction_classification, page_length = 20)
+  })
+  
+  output$moveDirectionByVariableTable <- renderReactable({
+    req(processed_data(), input$quantGroupVars)
+    df <- processed_data()$move_direction_by_variable_wide
+    if ("Variable" %in% names(df)) df <- df[df$Variable %in% input$quantGroupVars, ]
+    build_quant_table(df, page_length = 20)
+  })
+  
+  output$directedLinkCountsTable <- renderReactable({
+    req(processed_data(), input$quantGroupVars)
+    df <- processed_data()$link_counts_between_categories_long
+    if ("Variable" %in% names(df)) df <- df[df$Variable %in% input$quantGroupVars, ]
+    build_quant_table(df, page_length = 20)
+  })
+  
+  output$undirectedLinkCountsTable <- renderReactable({
+    req(processed_data(), input$quantGroupVars)
+    df <- processed_data()$undirected_link_counts_long
+    if ("Variable" %in% names(df)) df <- df[df$Variable %in% input$quantGroupVars, ]
+    build_quant_table(df, page_length = 20)
+  })
+  
+  output$cmThresholdsTable <- renderReactable({
+    req(processed_data())
+    build_quant_table(processed_data()$directional_cm_thresholds, page_length = 15)
+  })
+  
+  output$cmRankingTable <- renderReactable({
+    req(processed_data())
+    build_quant_table(processed_data()$directional_scores, page_length = 20)
+  })
+  
+  output$cmMoveCountsTable <- renderReactable({
+    req(processed_data())
+    build_quant_table(processed_data()$directional_critical_move_counts, page_length = 20)
+  })
+  
+  output$cmCountsByVariableTable <- renderReactable({
+    # ---> NEW: Now strictly listens to the dropdown on its own tab
+    req(processed_data(), input$cmGroupVars) 
+    
+    df <- processed_data()$directional_critical_moves_by_variable
+    
+    if ("Variable" %in% names(df)) {
+      df <- df[df$Variable %in% input$cmGroupVars, ]
+    }
+    
+    build_quant_table(df, page_length = 20)
+  })
+  
+  output$downloadQuantOutputs <- downloadHandler(
+    filename = function() {
+      paste0("linkography_outputs-", format(Sys.time(), "%Y-%m-%d_%H-%M-%S"), ".xlsx")
+    },
+    content = function(file) {
+      req(processed_data())
+      pd <- processed_data()
+      
+      wb <- openxlsx::createWorkbook()
+      
+      openxlsx::addWorksheet(wb, "Summary")
+      openxlsx::writeData(wb, "Summary", pd$linkography_summary)
+      
+      openxlsx::addWorksheet(wb, "Descriptive Statistics")
+      openxlsx::writeData(wb, "Descriptive Statistics", pd$descriptive_statistics)
+      
+      openxlsx::addWorksheet(wb, "Link Span")
+      openxlsx::writeData(wb, "Link Span", pd$distance_table)
+      
+      openxlsx::addWorksheet(wb, "Inter Intra Links")
+      openxlsx::writeData(wb, "Inter Intra Links", pd$inter_intra_links_by_variable)
+      
+      openxlsx::addWorksheet(wb, "Move Direction Counts")
+      openxlsx::writeData(wb, "Move Direction Counts", pd$move_direction_counts)
+      
+      openxlsx::addWorksheet(wb, "Move Direction Classification")
+      openxlsx::writeData(wb, "Move Direction Classification", pd$moves_with_direction_classification)
+      
+      openxlsx::addWorksheet(wb, "Move Direction by Variable")
+      openxlsx::writeData(wb, "Move Direction by Variable", pd$move_direction_by_variable_wide)
+      
+      openxlsx::addWorksheet(wb, "CM Ranking List")
+      openxlsx::writeData(wb, "CM Ranking List", pd$directional_scores)
+      
+      openxlsx::addWorksheet(wb, "CM Threshold List")
+      openxlsx::writeData(wb, "CM Threshold List", pd$directional_cm_thresholds)
+      
+      openxlsx::addWorksheet(wb, "CM Move Counts")
+      openxlsx::writeData(wb, "CM Move Counts", pd$directional_critical_move_counts)
+      
+      openxlsx::addWorksheet(wb, "CM Counts by Variable")
+      openxlsx::writeData(wb, "CM Counts by Variable", pd$directional_critical_moves_by_variable)
+      
+      write_list_of_tables_to_sheet(
+        wb = wb,
+        sheet_name = "Undirected Link Matrices",
+        table_list = pd$undirected_link_matrices_by_variable
+      )
+      
+      write_list_of_tables_to_sheet(
+        wb = wb,
+        sheet_name = "Directed Link Matrices",
+        table_list = pd$link_matrices_by_variable
+      )
+      
+      openxlsx::saveWorkbook(
+        wb,
+        file = file,
+        overwrite = TRUE
+      )
+    }
+  )
+  
+  # Duplicate Download Handler for the Move Classification Tab
+  output$downloadClassOutputs <- downloadHandler(
+    filename = function() {
+      paste0("linkography_outputs-", format(Sys.time(), "%Y-%m-%d_%H-%M-%S"), ".xlsx")
+    },
+    content = function(file) {
+      req(processed_data())
+      pd <- processed_data()
+      
+      wb <- openxlsx::createWorkbook()
+      
+      openxlsx::addWorksheet(wb, "Summary")
+      openxlsx::writeData(wb, "Summary", pd$linkography_summary)
+      
+      openxlsx::addWorksheet(wb, "Descriptive Statistics")
+      openxlsx::writeData(wb, "Descriptive Statistics", pd$descriptive_statistics)
+      
+      openxlsx::addWorksheet(wb, "Link Span")
+      openxlsx::writeData(wb, "Link Span", pd$distance_table)
+      
+      openxlsx::addWorksheet(wb, "Inter Intra Links")
+      openxlsx::writeData(wb, "Inter Intra Links", pd$inter_intra_links_by_variable)
+      
+      openxlsx::addWorksheet(wb, "Move Direction Counts")
+      openxlsx::writeData(wb, "Move Direction Counts", pd$move_direction_counts)
+      
+      openxlsx::addWorksheet(wb, "Move Direction Classification")
+      openxlsx::writeData(wb, "Move Direction Classification", pd$moves_with_direction_classification)
+      
+      openxlsx::addWorksheet(wb, "Move Direction by Variable")
+      openxlsx::writeData(wb, "Move Direction by Variable", pd$move_direction_by_variable_wide)
+      
+      openxlsx::addWorksheet(wb, "CM Ranking List")
+      openxlsx::writeData(wb, "CM Ranking List", pd$directional_scores)
+      
+      openxlsx::addWorksheet(wb, "CM Threshold List")
+      openxlsx::writeData(wb, "CM Threshold List", pd$directional_cm_thresholds)
+      
+      openxlsx::addWorksheet(wb, "CM Move Counts")
+      openxlsx::writeData(wb, "CM Move Counts", pd$directional_critical_move_counts)
+      
+      openxlsx::addWorksheet(wb, "CM Counts by Variable")
+      openxlsx::writeData(wb, "CM Counts by Variable", pd$directional_critical_moves_by_variable)
+      
+      write_list_of_tables_to_sheet(
+        wb = wb,
+        sheet_name = "Undirected Link Matrices",
+        table_list = pd$undirected_link_matrices_by_variable
+      )
+      
+      write_list_of_tables_to_sheet(
+        wb = wb,
+        sheet_name = "Directed Link Matrices",
+        table_list = pd$link_matrices_by_variable
+      )
+      
+      openxlsx::saveWorkbook(
+        wb,
+        file = file,
+        overwrite = TRUE
+      )
+    }
+  )
   
   selected_colors <- reactive({
     req(input$archiographColumn)
@@ -646,11 +3154,6 @@ server <- function(input, output, session) {
     
     colors  # Return a list of colors mapped to their factors
   })
-  
-  
-  
-  
-  
   
   # Reactive value to store the number of custom patterns
   customPatternCount <- reactiveVal(1)
@@ -708,298 +3211,499 @@ server <- function(input, output, session) {
     })
   })
   
-  
-  
-  
-  
-  
+  # Dynamically generate UI controls for identified web/chunk patterns
+  output$webChunkResultsUI <- renderUI({
+    patterns <- web_chunk_data()
+    
+    if (length(patterns) == 0) {
+      return(tags$p("No chunks found with current settings.", style = "color: #FA8072; font-weight: bold; font-size: 0.85rem;"))
+    }
+    
+    # 1. UI for when Global Styling is OFF (Individual controls)
+    chunk_ui <- lapply(seq_along(patterns), function(i) {
+      pattern <- patterns[[i]]
+      move_range <- paste(min(pattern$nodes), "-", max(pattern$nodes))
+      
+      conditionalPanel(
+        condition = "!input.globalChunkStyle",
+        div(
+          style = "background: #F6F7F9; padding: 12px; border-radius: 12px; margin-bottom: 12px; border: 1px solid #E7EAEE;",
+          h6(paste("Chunk", i, ": Moves", move_range), style = "margin-top: 0; color: var(--cater-midnight); font-weight: 800; font-size: 0.85rem;"),
+          p(paste("Density:", round(pattern$connection_percentage, 1), "%"), style = "font-size: 0.75rem; margin-bottom: 10px; color: #5B6770;"),
+          colourpicker::colourInput(paste0("chunkColor_", i), "Colour", value = "green"),
+          sliderInput(paste0("chunkWeight_", i), "Line Weight", min = 0.5, max = 5, value = 2, step = 0.1)
+        )
+      )
+    })
+    
+    # 2. UI for when Global Styling is ON (Just a clean list summary)
+    list_ui <- conditionalPanel(
+      condition = "input.globalChunkStyle",
+      tags$ul(
+        style = "padding-left: 20px; font-size: 0.82rem; color: var(--cater-midnight); font-weight: 600;",
+        lapply(seq_along(patterns), function(i) {
+          pattern <- patterns[[i]]
+          tags$li(
+            paste0("Chunk ", i, ": Moves ", min(pattern$nodes), "-", max(pattern$nodes), 
+                   " (", round(pattern$connection_percentage, 1), "%)")
+          )
+        })
+      )
+    )
+    
+    tagList(list_ui, do.call(tagList, chunk_ui))
+  })
   
   # Render the interactive plot
   plotToExport <- reactive({
-    req(scaled_connections_df())  # Use the reactive scaled connections_df
+    req(scaled_connections_df())
     
-    # If no eligible columns, render a plot without the Archiograph layers
-    if (input$archiographColumn == "No eligible columns") {
-      
-      # Extract processed data
-      moves_df <- processed_data()$moves_df
-      connections_df <- scaled_connections_df()  # Use the reactive scaled connections_df
-      uni_forward_moves <- processed_data()$uni_forward_moves
-      uni_backward_moves <- processed_data()$uni_backward_moves
-      bidirectional_moves <- processed_data()$bidirectional_moves
-      sawtooth_sequence <- processed_data()$sawtooth_sequence
-      
-      # Filter moves_df to select every nth move
-      filtered_moves_df <- moves_df %>% filter(row_number() %% input$moveDisplayFrequency == 0)
-      
-      # Create the base plot using ggplot2
-      p <- ggplot() +
-        geom_segment(data = connections_df, aes(x = from_x, xend = mid_x, y = 0, yend = mid_y_scaled), 
-                     color = input$segmentColor, size = input$segmentSize) +
-        geom_segment(data = connections_df, aes(x = to_x, xend = mid_x, y = 0, yend = mid_y_scaled), 
-                     color = input$segmentColor, size = input$segmentSize) +
-        coord_cartesian(ylim = input$yAxisRange)  # Fix the Y-axis range here
-      
-      # Overlay the unidirectional forward lines if toggled on
-      if (input$showUniForward) {
-        p <- p + 
-          geom_segment(data = filter(connections_df, from %in% uni_forward_moves | to %in% uni_forward_moves), 
-                       aes(x = to_x, xend = mid_x, y = 0, yend = mid_y_scaled), 
-                       color = input$uniForwardColor, size = input$uniForwardWeight)
-      }
-      
-      # Overlay the unidirectional backward lines if toggled on
-      if (input$showUniBackward) {
-        p <- p + 
-          geom_segment(data = filter(connections_df, from %in% uni_backward_moves | to %in% uni_backward_moves), 
-                       aes(x = from_x, xend = mid_x, y = 0, yend = mid_y_scaled), 
-                       color = input$uniBackwardColor, size = input$uniBackwardWeight)
-      }
-      
-      # Overlay the bidirectional lines if toggled on
-      if (input$showBidirectional) {
-        p <- p + 
-          geom_segment(data = filter(connections_df, from %in% bidirectional_moves | to %in% bidirectional_moves), 
-                       aes(x = to_x, xend = mid_x, y = 0, yend = mid_y_scaled), 
-                       color = input$bidirectionalColor, size = input$bidirectionalWeight) +
-          geom_segment(data = filter(connections_df, from %in% bidirectional_moves | to %in% bidirectional_moves), 
-                       aes(x = from_x, xend = mid_x, y = 0, yend = mid_y_scaled), 
-                       color = input$bidirectionalColor, size = input$bidirectionalWeight)
-      }
-      
-      # Overlay the sawtooth pattern if toggled on
-      if (input$showSawtooth) {
-        p <- p +
-          geom_segment(data = connections_df %>% filter(sawtooth_role == "Middle Moves"), 
-                       aes(x = from_x, xend = mid_x, y = 0, yend = mid_y_scaled), 
-                       color = input$sawtoothColor, size = input$sawtoothWeight) +
-          geom_segment(data = connections_df %>% filter(sawtooth_role == "Middle Moves"), 
-                       aes(x = to_x, xend = mid_x, y = 0, yend = mid_y_scaled), 
-                       color = input$sawtoothColor, size = input$sawtoothWeight)
-      }
-      
-      # Overlay custom patterns
-      for (pattern in customPatterns()) {
-        if (pattern$show) {
-          pattern_moves <- seq(pattern$from, pattern$to)
-          p <- p +
-            geom_segment(data = filter(connections_df, from %in% pattern_moves & to %in% pattern_moves), 
-                         aes(x = from_x, xend = mid_x, y = 0, yend = mid_y_scaled), 
-                         color = pattern$color, size = pattern$weight) +
-            geom_segment(data = filter(connections_df, from %in% pattern_moves & to %in% pattern_moves), 
-                         aes(x = to_x, xend = mid_x, y = 0, yend = mid_y_scaled), 
-                         color = pattern$color, size = pattern$weight)
-        }
-      }
-      
-      # Overlay the web and chunk patterns if toggled on and the analysis is performed
-      if (input$showWebChunk && input$runWebChunk > 0) {
-        patterns_100 <- web_chunk_data()
-        for (pattern in patterns_100) {
-          connections_df$pattern_id <- NA
-          connections_df$pattern_id[connections_df$from %in% pattern$nodes & connections_df$to %in% pattern$nodes] <- pattern$connection_percentage
-          p <- p +
-            geom_segment(data = filter(connections_df, !is.na(pattern_id)), 
-                         aes(x = from_x, xend = mid_x, y = 0, yend = mid_y_scaled, size = pattern_id, color = pattern_id)) +
-            geom_segment(data = filter(connections_df, !is.na(pattern_id)), 
-                         aes(x = to_x, xend = mid_x, y = 0, yend = mid_y_scaled, size = pattern_id, color = pattern_id))
-        }
-        
-        # Apply gradient color scaling without legend
-        p <- p + scale_color_gradient(low = input$webChunkLowColor, high = input$webChunkHighColor, guide = "none") +
-          scale_size_continuous(range = c(input$webChunkWeight * 0.5, input$webChunkWeight * 2), name = "Connection Percentage") +
-          guides(color = "none")  # Remove the gradient from the legend
-      }
-      
-      # Add points and text on top of the lines
-      p <- p +
-        geom_point(data = moves_df, aes(x = x, y = y), size = input$pointSize, color = input$pointColor) +
-        geom_point(data = connections_df, aes(x = mid_x, y = mid_y_scaled), size = input$midPointSize, color = input$midPointColor) +
-        geom_text(data = filtered_moves_df, aes(x = x + input$textOffsetX, y = y + input$textOffsetY, label = move), vjust = -1, size = input$textSize) +
-        theme_minimal() +
-        theme(axis.line = element_blank(),
-              axis.text.x = element_text(hjust = 1),
-              axis.text.y = element_blank(),
-              axis.ticks = element_blank(),
-              axis.title.x = element_blank(),
-              axis.title.y = element_blank(),
-              panel.background = element_blank(),
-              panel.border = element_blank(),
-              panel.grid.major = element_blank(),
-              panel.grid.minor = element_blank(),
-              plot.background = element_blank()) +
-        scale_x_continuous(breaks = NULL)
-      
-      # Return the plot
-      return(p)
-    }
-    
-    req(selected_colors())  # Ensure selected_colors is valid
-    
-    # Extract processed data
-    connections_df <- scaled_connections_df()
-    archiograph_moves_df <- processed_data()$archiograph_moves_df
-    
-    # Map colors to 'from' and 'to' moves in connections_df
-    from_colors <- sapply(connections_df$from, function(move) {
-      factor <- archiograph_moves_df[[input$archiographColumn]][archiograph_moves_df$move == move]
-      color <- selected_colors()[[factor]]
-      if (is.null(color)) "black" else color  # Default to "black" if color is NULL
-    })
-    
-    to_colors <- sapply(connections_df$to, function(move) {
-      factor <- archiograph_moves_df[[input$archiographColumn]][archiograph_moves_df$move == move]
-      color <- selected_colors()[[factor]]
-      if (is.null(color)) "black" else color  # Default to "black" if color is NULL
-    })
-    
-
-    # Extract processed data
     moves_df <- processed_data()$moves_df
-    connections_df <- scaled_connections_df()  # Use the reactive scaled connections_df
+    connections_df <- scaled_connections_df()
+    
+    # ---> NEW: Clean Crop Logic <---
+    crop_min <- input$plotCropRange[1]
+    crop_max <- input$plotCropRange[2]
+    
+    # Safety check for app load
+    if (is.null(crop_min)) crop_min <- 1
+    if (is.null(crop_max)) crop_max <- max(moves_df$move, na.rm = TRUE)
+    
+    # Filter out any connections that cross the boundary
+    connections_df <- connections_df %>%
+      dplyr::filter(
+        from >= crop_min & from <= crop_max,
+        to >= crop_min & to <= crop_max
+      )
+    
+    # Filter the nodes/labels
+    moves_df <- moves_df %>%
+      dplyr::filter(
+        move >= crop_min & move <= crop_max
+      )
+    # ---> END NEW LOGIC <---
+    
     uni_forward_moves <- processed_data()$uni_forward_moves
     uni_backward_moves <- processed_data()$uni_backward_moves
     bidirectional_moves <- processed_data()$bidirectional_moves
-    sawtooth_sequence <- processed_data()$sawtooth_sequence
     
-    # Filter moves_df to select every nth move
-    filtered_moves_df <- moves_df %>% filter(row_number() %% input$moveDisplayFrequency == 0)
+    filtered_moves_df <- moves_df %>%
+      filter(row_number() %% input$moveDisplayFrequency == 0)
     
-    # Create the base plot using ggplot2
-    p <- ggplot() +
-      geom_segment(data = connections_df, aes(x = from_x, xend = mid_x, y = 0, yend = mid_y_scaled), 
-                   color = input$segmentColor, size = input$segmentSize) +
-      geom_segment(data = connections_df, aes(x = to_x, xend = mid_x, y = 0, yend = mid_y_scaled), 
-                   color = input$segmentColor, size = input$segmentSize) +
-      coord_cartesian(ylim = input$yAxisRange)  # Fix the Y-axis range here
+    eligible_archiograph <- !is.null(input$archiographColumn) &&
+      input$archiographColumn != "No eligible columns" &&
+      input$archiographColumn %in% names(processed_data()$archiograph_moves_df)
     
-    # Overlay the unidirectional forward lines if toggled on
-    if (input$showUniForward) {
-      p <- p + 
-        geom_segment(data = filter(connections_df, from %in% uni_forward_moves | to %in% uni_forward_moves), 
-                     aes(x = to_x, xend = mid_x, y = 0, yend = mid_y_scaled), 
-                     color = input$uniForwardColor, size = input$uniForwardWeight)
-    }
-    
-    # Overlay the unidirectional backward lines if toggled on
-    if (input$showUniBackward) {
-      p <- p + 
-        geom_segment(data = filter(connections_df, from %in% uni_backward_moves | to %in% uni_backward_moves), 
-                     aes(x = from_x, xend = mid_x, y = 0, yend = mid_y_scaled), 
-                     color = input$uniBackwardColor, size = input$uniBackwardWeight)
-    }
-    
-    # Overlay the bidirectional lines if toggled on
-    if (input$showBidirectional) {
-      p <- p + 
-        geom_segment(data = filter(connections_df, from %in% bidirectional_moves | to %in% bidirectional_moves), 
-                     aes(x = to_x, xend = mid_x, y = 0, yend = mid_y_scaled), 
-                     color = input$bidirectionalColor, size = input$bidirectionalWeight) +
-        geom_segment(data = filter(connections_df, from %in% bidirectional_moves | to %in% bidirectional_moves), 
-                     aes(x = from_x, xend = mid_x, y = 0, yend = mid_y_scaled), 
-                     color = input$bidirectionalColor, size = input$bidirectionalWeight)
-    }
-    
-    # Overlay the sawtooth pattern if toggled on
-    if (input$showSawtooth) {
-      p <- p +
-        geom_segment(data = connections_df %>% filter(sawtooth_role == "Middle Moves"), 
-                     aes(x = from_x, xend = mid_x, y = 0, yend = mid_y_scaled), 
-                     color = input$sawtoothColor, size = input$sawtoothWeight) +
-        geom_segment(data = connections_df %>% filter(sawtooth_role == "Middle Moves"), 
-                     aes(x = to_x, xend = mid_x, y = 0, yend = mid_y_scaled), 
-                     color = input$sawtoothColor, size = input$sawtoothWeight)
-    }
-    
-    # Overlay custom patterns
-    for (pattern in customPatterns()) {
-      if (pattern$show) {
-        pattern_moves <- seq(pattern$from, pattern$to)
-        p <- p +
-          geom_segment(data = filter(connections_df, from %in% pattern_moves & to %in% pattern_moves), 
-                       aes(x = from_x, xend = mid_x, y = 0, yend = mid_y_scaled), 
-                       color = pattern$color, size = pattern$weight) +
-          geom_segment(data = filter(connections_df, from %in% pattern_moves & to %in% pattern_moves), 
-                       aes(x = to_x, xend = mid_x, y = 0, yend = mid_y_scaled), 
-                       color = pattern$color, size = pattern$weight)
-      }
-    }
-    
-    # Overlay the archiograph if toggled on
-    if (input$showArchiograph) {
-      p <- p +
-        geom_curve(data = connections_df, aes(x = from_x, xend = mid_x, y = 0, yend = (mid_y_scaled_arc * -1)), 
-                   color = from_colors, size = input$archiographWeight, curvature = 0.3) +
-        geom_curve(data = connections_df, aes(x = mid_x, xend = to_x, y = (mid_y_scaled_arc * -1), yend = 0), 
-                   color = to_colors, size = input$archiographWeight, curvature = 0.3)
-    }
-    
-    # Overlay the web and chunk patterns if toggled on and the analysis is performed
-    if (input$showWebChunk && input$runWebChunk > 0) {
-      patterns_100 <- web_chunk_data()
-      for (pattern in patterns_100) {
-        connections_df$pattern_id <- NA
-        connections_df$pattern_id[connections_df$from %in% pattern$nodes & connections_df$to %in% pattern$nodes] <- pattern$connection_percentage
-        p <- p +
-          geom_segment(data = filter(connections_df, !is.na(pattern_id)), 
-                       aes(x = from_x, xend = mid_x, y = 0, yend = mid_y_scaled, size = pattern_id, color = pattern_id)) +
-          geom_segment(data = filter(connections_df, !is.na(pattern_id)), 
-                       aes(x = to_x, xend = mid_x, y = 0, yend = mid_y_scaled, size = pattern_id, color = pattern_id))
+    if (isTRUE(input$autoYAxis)) {
+      # 1. Base extreme points (y = 0 is the baseline for moves)
+      base_min <- min(connections_df$mid_y_scaled, na.rm = TRUE)
+      base_max <- 0
+      
+      # Safety check if there are no links at all
+      if (is.infinite(base_min)) base_min <- -5
+      
+      # 2. Check Archiograph bounds (which swing upwards)
+      if (isTRUE(input$showArchiograph) && eligible_archiograph) {
+        max_arc <- max(abs(connections_df$mid_y_scaled_arc), na.rm = TRUE) * 1.5
+        base_max <- max(base_max, max_arc)
+        base_min <- min(base_min, -max_arc)
       }
       
-      # Apply gradient color scaling without legend
-      p <- p + scale_color_gradient(low = input$webChunkLowColor, high = input$webChunkHighColor, guide = "none") +
-        scale_size_continuous(range = c(input$webChunkWeight * 0.5, input$webChunkWeight * 2), name = "Connection Percentage") +
-        guides(color = "none")  # Remove the gradient from the legend
+      # 3. Calculate total vertical span to create proportional padding
+      span <- base_max - base_min
+      if (span == 0) span <- 10
+      
+      # Use 5% proportional padding instead of a hardcoded flat "2" units
+      padding <- span * 0.05
+      
+      # 4. Add specific space for CM Notation ONLY if it is actually turned on
+      top_padding <- padding
+      if (isTRUE(input$showCmNotation)) {
+        # Ensure there is a safe buffer for the text symbols above the line
+        notation_height <- (input$cmNotationY %||% 0.6) + 2.5
+        top_padding <- max(padding, notation_height)
+      }
+      
+      # 5. Set the final dynamic limits
+      plot_ylim <- c(base_min - padding, base_max + top_padding)
+    } else {
+      plot_ylim <- input$yAxisRange
     }
     
-    # Add points and text on top of the lines
-    p <- p +
-      geom_point(data = moves_df, aes(x = x, y = y), size = input$pointSize, color = input$pointColor) +
-      geom_point(data = connections_df, aes(x = mid_x, y = mid_y_scaled), size = input$midPointSize, color = input$midPointColor) +
-      geom_text(data = filtered_moves_df, aes(x = x + input$textOffsetX, y = y + input$textOffsetY, label = move), vjust = -1, size = input$textSize) +
-      theme_minimal() +
-      theme(axis.line = element_blank(),
-            axis.text.x = element_text(hjust = 1),
-            axis.text.y = element_blank(),
-            axis.ticks = element_blank(),
-            axis.title.x = element_blank(),
-            axis.title.y = element_blank(),
-            panel.background = element_blank(),
-            panel.border = element_blank(),
-            panel.grid.major = element_blank(),
-            panel.grid.minor = element_blank(),
-            plot.background = element_blank()) +
-      scale_x_continuous(breaks = NULL)
+    # Calculate visual boundaries. Expand left side if CM Notation is on to fit the text.
+    plot_xlim <- c(crop_min - 0.5, crop_max + 0.5)
+    if (isTRUE(input$showCmNotation)) {
+      # Safely expand left boundary so the slider-adjusted text never gets cut off
+      offset <- input$cmLabelXOffset %||% -0.75
+      plot_xlim[1] <- crop_min + offset - 1 
+    }
     
-    # Return the plot
-    return(p)
+    p <- ggplot() +
+      
+      # Base linkograph layer
+      geom_segment(
+        data = connections_df,
+        aes(x = from_x, xend = mid_x, y = 0, yend = mid_y_scaled),
+        colour = input$segmentColor,
+        linewidth = input$segmentSize,
+        lineend = "round"
+      ) +
+      geom_segment(
+        data = connections_df,
+        aes(x = to_x, xend = mid_x, y = 0, yend = mid_y_scaled),
+        colour = input$segmentColor,
+        linewidth = input$segmentSize,
+        lineend = "round"
+      ) +
+    
+    coord_fixed(
+      ratio = 1,
+      xlim = plot_xlim,  # <--- Uses the dynamically expanded boundaries
+      ylim = plot_ylim,
+      clip = "on"
+    )
+    
+    # Unidirectional forward highlight
+    if (isTRUE(input$showUniForward)) {
+      p <- p +
+        geom_segment(
+          data = filter(connections_df, from %in% uni_forward_moves | to %in% uni_forward_moves),
+          aes(x = to_x, xend = mid_x, y = 0, yend = mid_y_scaled),
+          colour = input$uniForwardColor,
+          linewidth = input$uniForwardWeight,
+          lineend = "round"
+        )
+    }
+    
+    # Unidirectional backward highlight
+    if (isTRUE(input$showUniBackward)) {
+      p <- p +
+        geom_segment(
+          data = filter(connections_df, from %in% uni_backward_moves | to %in% uni_backward_moves),
+          aes(x = from_x, xend = mid_x, y = 0, yend = mid_y_scaled),
+          colour = input$uniBackwardColor,
+          linewidth = input$uniBackwardWeight,
+          lineend = "round"
+        )
+    }
+    
+    # Bidirectional highlight
+    if (isTRUE(input$showBidirectional)) {
+      p <- p +
+        geom_segment(
+          data = filter(connections_df, from %in% bidirectional_moves | to %in% bidirectional_moves),
+          aes(x = from_x, xend = mid_x, y = 0, yend = mid_y_scaled),
+          colour = input$bidirectionalColor,
+          linewidth = input$bidirectionalWeight,
+          lineend = "round"
+        ) +
+        geom_segment(
+          data = filter(connections_df, from %in% bidirectional_moves | to %in% bidirectional_moves),
+          aes(x = to_x, xend = mid_x, y = 0, yend = mid_y_scaled),
+          colour = input$bidirectionalColor,
+          linewidth = input$bidirectionalWeight,
+          lineend = "round"
+        )
+    }
+    
+    # Sawtooth highlight
+    if (isTRUE(input$showSawtooth)) {
+      sawtooth_df <- connections_df %>%
+        filter(sawtooth_role == "Middle Moves")
+      
+      p <- p +
+        geom_segment(
+          data = sawtooth_df,
+          aes(x = from_x, xend = mid_x, y = 0, yend = mid_y_scaled),
+          colour = input$sawtoothColor,
+          linewidth = input$sawtoothWeight,
+          lineend = "round"
+        ) +
+        geom_segment(
+          data = sawtooth_df,
+          aes(x = to_x, xend = mid_x, y = 0, yend = mid_y_scaled),
+          colour = input$sawtoothColor,
+          linewidth = input$sawtoothWeight,
+          lineend = "round"
+        )
+    }
+    
+    # Trace Forward Highlights
+    if (isTRUE(input$showTraceForward) && length(input$traceForwardMoves) > 0) {
+      # For a forward trace, we find future moves that link BACK to the selected move(s)
+      trace_fwd_df <- connections_df %>%
+        filter(to %in% as.numeric(input$traceForwardMoves))
+      
+      if (nrow(trace_fwd_df) > 0) {
+        p <- p +
+          geom_segment(
+            data = trace_fwd_df,
+            # Only draw the half-line emanating from the 'to' node up to the midpoint
+            aes(x = to_x, xend = mid_x, y = 0, yend = mid_y_scaled),
+            colour = input$traceForwardColor, 
+            linewidth = input$traceForwardWeight, 
+            lineend = "round"
+          )
+      }
+    }
+    
+    # Trace Backward Highlights
+    if (isTRUE(input$showTraceBackward) && length(input$traceBackwardMoves) > 0) {
+      # For a backward trace, we find past moves that the selected move(s) link BACK to
+      trace_bwd_df <- connections_df %>%
+        filter(from %in% as.numeric(input$traceBackwardMoves))
+      
+      if (nrow(trace_bwd_df) > 0) {
+        p <- p +
+          geom_segment(
+            data = trace_bwd_df,
+            # Only draw the half-line emanating from the 'from' node up to the midpoint
+            aes(x = from_x, xend = mid_x, y = 0, yend = mid_y_scaled),
+            colour = input$traceBackwardColor, 
+            linewidth = input$traceBackwardWeight, 
+            lineend = "round"
+          )
+      }
+    }
+    
+    # Custom pattern highlights
+    for (pattern in customPatterns()) {
+      if (isTRUE(pattern$show)) {
+        pattern_moves <- seq(pattern$from, pattern$to)
+        
+        pattern_df <- connections_df %>%
+          filter(from %in% pattern_moves & to %in% pattern_moves)
+        
+        p <- p +
+          geom_segment(
+            data = pattern_df,
+            aes(x = from_x, xend = mid_x, y = 0, yend = mid_y_scaled),
+            colour = pattern$color,
+            linewidth = pattern$weight,
+            lineend = "round"
+          ) +
+          geom_segment(
+            data = pattern_df,
+            aes(x = to_x, xend = mid_x, y = 0, yend = mid_y_scaled),
+            colour = pattern$color,
+            linewidth = pattern$weight,
+            lineend = "round"
+          )
+      }
+    }
+    
+    # Archiograph overlay
+    if (isTRUE(input$showArchiograph) && eligible_archiograph) {
+      archiograph_moves_df <- processed_data()$archiograph_moves_df
+      color_map <- unlist(selected_colors())
+      
+      connections_df <- connections_df %>%
+        left_join(
+          archiograph_moves_df %>%
+            select(move, from_factor = all_of(input$archiographColumn)),
+          by = c("from" = "move")
+        ) %>%
+        left_join(
+          archiograph_moves_df %>%
+            select(move, to_factor = all_of(input$archiographColumn)),
+          by = c("to" = "move")
+        )
+      
+      p <- p +
+        geom_curve(
+          data = connections_df,
+          aes(
+            x = from_x,
+            xend = mid_x,
+            y = 0,
+            yend = mid_y_scaled_arc * -1,
+            colour = from_factor
+          ),
+          linewidth = input$archiographWeight,
+          curvature = 0.25,
+          alpha = 0.85
+        ) +
+        geom_curve(
+          data = connections_df,
+          aes(
+            x = mid_x,
+            xend = to_x,
+            y = mid_y_scaled_arc * -1,
+            yend = 0,
+            colour = to_factor
+          ),
+          linewidth = input$archiographWeight,
+          curvature = 0.25,
+          alpha = 0.85
+        ) +
+        scale_colour_manual(values = color_map, na.value = "grey50")
+    }
+    
+    # Web and chunk overlay
+    if (isTRUE(input$showWebChunk) && input$runWebChunk > 0) {
+      patterns_100 <- web_chunk_data()
+      
+      for (i in seq_along(patterns_100)) {
+        pattern <- patterns_100[[i]]
+        
+        # Determine styling based on the toggle
+        if (isTRUE(input$globalChunkStyle)) {
+          c_color <- input$webChunkGlobalColor %||% "green"
+          c_weight <- input$webChunkGlobalWeight %||% 2
+        } else {
+          c_color <- input[[paste0("chunkColor_", i)]] %||% "green"
+          c_weight <- input[[paste0("chunkWeight_", i)]] %||% 2
+        }
+        
+        chunk_df <- connections_df %>%
+          filter(from %in% pattern$nodes & to %in% pattern$nodes)
+        
+        if (nrow(chunk_df) > 0) {
+          p <- p +
+            geom_segment(
+              data = chunk_df,
+              aes(x = from_x, xend = mid_x, y = 0, yend = mid_y_scaled),
+              colour = c_color,
+              linewidth = c_weight,
+              lineend = "round"
+            ) +
+            geom_segment(
+              data = chunk_df,
+              aes(x = to_x, xend = mid_x, y = 0, yend = mid_y_scaled),
+              colour = c_color,
+              linewidth = c_weight,
+              lineend = "round"
+            )
+        }
+      }
+    }
+    
+    # Move points
+    p <- p +
+      geom_point(
+        data = moves_df,
+        aes(x = x, y = y),
+        size = input$pointSize,
+        colour = input$pointColor
+      )
+    
+    # Optional midpoint points
+    if (isTRUE(input$showMidpoints)) {
+      p <- p +
+        geom_point(
+          data = connections_df,
+          aes(x = mid_x, y = mid_y_scaled),
+          size = input$midPointSize,
+          colour = input$midPointColor,
+          alpha = 0.75
+        )
+    }
+    
+    # ---> NEW: Critical Move Notation Layer (Calculated Manually for 100% Reliability) <---
+    if (isTRUE(input$showCmNotation)) {
+      cm_thresh <- input$selectedCmThreshold %||% 2
+      
+      # We use the FULL UNFILTERED connections list from pd to get accurate counts
+      # regardless of how the visual crop is set.
+      full_conn <- processed_data()$connections_df
+      
+      # Raw Math: Count Forward links (how many future moves link BACK to this move)
+      fwd_counts <- full_conn %>% dplyr::count(to, name = "fwd_score")
+      
+      # Raw Math: Count Backward links (how many past moves this move links BACK to)
+      bwd_counts <- full_conn %>% dplyr::count(from, name = "bwd_score")
+      
+      # Build a clean table of just the moves inside the crop window
+      cm_symbols_df <- data.frame(plot_x = crop_min:crop_max) %>%
+        dplyr::left_join(fwd_counts, by = c("plot_x" = "to")) %>%
+        dplyr::left_join(bwd_counts, by = c("plot_x" = "from")) %>%
+        # Replace NAs with 0 for moves with no connections
+        dplyr::mutate(
+          fwd_score = ifelse(is.na(fwd_score), 0, fwd_score),
+          bwd_score = ifelse(is.na(bwd_score), 0, bwd_score)
+        ) %>%
+        # Apply the threshold to find Critical Moves
+        dplyr::mutate(
+          is_fwd = fwd_score >= cm_thresh,
+          is_bwd = bwd_score >= cm_thresh,
+          cm_symbol = dplyr::case_when(
+            is_fwd & is_bwd ~ "<>",
+            is_fwd ~ ">",
+            is_bwd ~ "<",
+            TRUE ~ NA_character_
+          )
+        ) %>%
+        dplyr::filter(!is.na(cm_symbol))
+      
+      # Pull exact coordinates and size from your UI sliders
+      sym_y <- input$cmNotationY %||% 0.6
+      lbl_x <- crop_min + (input$cmLabelXOffset %||% -0.75)
+      sym_size <- input$cmNotationSize %||% 4.5 # <--- NEW: Dynamic font size
+      
+      # 1. Draw the Threshold Label on the left
+      label_df <- data.frame(x = lbl_x, y = sym_y, lbl = paste0("CM^", cm_thresh))
+      
+      p <- p + geom_text(
+        data = label_df,
+        aes(x = x, y = y, label = lbl),
+        parse = TRUE, fontface = "bold", color = "#0A4F57", size = sym_size, hjust = 1 # <--- Updated to sym_size
+      )
+      
+      # 2. Draw the <, >, <> symbols above the moves
+      if (nrow(cm_symbols_df) > 0) {
+        p <- p + geom_text(
+          data = cm_symbols_df,
+          aes(x = plot_x, y = sym_y, label = cm_symbol),
+          fontface = "bold", size = sym_size, color = "#0A4F57", vjust = 0.5 # <--- Updated to sym_size
+        )
+      }
+    }
+    
+    # Move labels and final theme
+    p <- p +
+      geom_text(
+        data = filtered_moves_df,
+        aes(
+          x = x + input$textOffsetX,
+          y = y + input$textOffsetY,
+          label = move
+        ),
+        vjust = -1,
+        size = input$textSize
+      ) +
+      scale_x_continuous(
+        breaks = NULL,
+        expand = expansion(mult = c(0.02, 0.02))
+      ) +
+      theme_void() +
+      theme(
+        plot.margin = margin(20, 20, 20, 20),
+        legend.position = "bottom"
+      )
+    
+    p
   })
+  
+  
   output$interactivePlot <- renderPlot({
     plotToExport()  # This will render the plot in the UI
   })
   
-  output$interactivePlot <- renderPlot({
-    plotToExport()
-  })
-  
   output$downloadPlot <- downloadHandler(
     filename = function() {
-      paste("plot-", Sys.Date(), ".pdf", sep = "")
+      paste0("linkgraphy-plot-", format(Sys.time(), "%Y-%m-%d_%H-%M-%S"), ".pdf")
     },
     content = function(file) {
-      # Open a PDF device with user-specified settings
+      # Removed cairo_pdf device to ensure compatibility with WebR/Shinylive
       ggsave(file, 
              plot = plotToExport(), 
-             device = cairo_pdf, 
              width = input$pdfWidth, 
              height = input$pdfHeight, 
-             units = "mm")
+             units = "mm",
+             scale = input$pdfScale) # <--- NEW: Applies the scaling slider
     }
   )
 }
-
-
 
 # Function to identify sawtooth sequences
 identify_sawtooth_patterns <- function(df) {
@@ -1060,72 +3764,89 @@ identify_sawtooth_patterns <- function(df) {
   return(sawtooth_sequences)
 }
 
-# Function to identify patterns
-identify_patterns <- function(df, min_moves, max_moves, min_connection_percentage,  max_connection_percentage = 100) {
+# Function to identify patterns (Optimized Sliding Window Approach)
+identify_patterns <- function(df, min_moves, max_moves, min_connection_percentage, max_connection_percentage = 100) {
   require(igraph)
   
   # Validate parameters
   if (!is.data.frame(df)) stop("Input df must be a data frame.")
   if (min_moves < 2) stop("min_moves must be at least 2.")
   if (max_moves < min_moves) stop("max_moves must be greater than or equal to min_moves.")
-  
-  # Ensure the df has 'from' and 'to' columns and create a new df with only these columns
   if (!all(c("from", "to") %in% colnames(df))) stop("Data frame must contain 'from' and 'to' columns.")
-  df <- df[, c("from", "to")]  # Select only 'from' and 'to' columns
   
-  # Convert edge list to an undirected graph, ensuring numerical order of vertices
+  df <- df[, c("from", "to")] 
   g <- graph_from_data_frame(df, directed = FALSE)
-  V(g)$name <- as.character(V(g)$name) # Ensure vertex names are treated as characters for sorting
+  
+  # Extract numeric nodes and sort them
+  nodes <- sort(as.numeric(V(g)$name))
   
   identified_patterns <- list()
   
+  # Use a sliding window instead of combinatorial generation
   for (size in min_moves:max_moves) {
-    combos <- combn(as.numeric(V(g)$name), size, simplify = FALSE) # Work with numeric vertex names directly
-    for (combo in combos) {
-      # Sort combo to ensure ascending order, crucial for sequences involving 1
-      combo <- sort(combo)
+    # Skip if there aren't enough nodes to form a chunk of this size
+    if (length(nodes) < size) next
+    
+    # Slide a window of 'size' across the sorted nodes
+    for (i in 1:(length(nodes) - size + 1)) {
+      combo <- nodes[i:(i + size - 1)]
       
-      # Check for sequential order (if needed, based on previous discussions)
-      is_sequential <- all(diff(combo) == 1)
+      # 1. The nodes must be strictly sequential (no gaps in the move numbers)
+      if (!all(diff(combo) == 1)) next
       
-      if (is_sequential) { # Proceed if combo is sequentially ordered
-        subg <- induced_subgraph(g, V(g)$name %in% combo)
-        actual_connections <- gsize(subg)
-        possible_connections <- size * (size - 1) / 2
-        connection_percentage <- (actual_connections / possible_connections) * 100
-        
-        # Check if the first and last node are directly connected
-        first_last_connected <- nrow(df[df$from %in% c(combo[1], combo[length(combo)]) & df$to %in% c(combo[length(combo)], combo[1]),]) > 0
-        
-        if (connection_percentage >= min_connection_percentage && connection_percentage <= max_connection_percentage && first_last_connected) {
-          identified_patterns[[length(identified_patterns) + 1]] <- list(nodes = combo, connection_percentage = connection_percentage)
-        }
+      # 2. The first and last nodes in the sequence must be directly connected
+      first_node <- combo[1]
+      last_node <- combo[size]
+      
+      first_last_connected <- any(
+        (df$from == first_node & df$to == last_node) | 
+          (df$to == first_node & df$from == last_node)
+      )
+      
+      if (!first_last_connected) next
+      
+      # 3. Check connection percentage of the induced subgraph
+      subg <- induced_subgraph(g, as.character(combo))
+      actual_connections <- gsize(subg)
+      possible_connections <- size * (size - 1) / 2
+      connection_percentage <- (actual_connections / possible_connections) * 100
+      
+      if (connection_percentage >= min_connection_percentage && connection_percentage <= max_connection_percentage) {
+        identified_patterns[[length(identified_patterns) + 1]] <- list(
+          nodes = combo, 
+          connection_percentage = connection_percentage
+        )
       }
     }
   }
   
-  # Filter out patterns that are subsets of larger patterns
-  filtered_patterns <- lapply(identified_patterns, function(pattern) pattern$nodes)
-  larger_patterns_only <- Filter(function(x) !any(sapply(filtered_patterns, function(y) all(x %in% y) && length(x) < length(y))), filtered_patterns)
+  # If nothing was found, return an empty list early
+  if (length(identified_patterns) == 0) return(list())
   
-  # Convert back to original structure if needed
-  final_patterns <- lapply(larger_patterns_only, function(nodes) {
-    connection_percentages <- sapply(identified_patterns, function(pattern) {
-      if(all(nodes %in% pattern$nodes)) {
-        return(pattern$connection_percentage)
-      } else {
-        return(NA)
-      }
-    })
-    mean_connection_percentage <- mean(connection_percentages, na.rm = TRUE) # Use na.rm here
+  # Filter out patterns that are subsets of larger valid patterns
+  # Sort patterns by length descending to make the subset check highly efficient
+  pattern_lengths <- sapply(identified_patterns, function(x) length(x$nodes))
+  identified_patterns <- identified_patterns[order(pattern_lengths, decreasing = TRUE)]
+  
+  final_patterns <- list()
+  
+  for (i in seq_along(identified_patterns)) {
+    current_nodes <- identified_patterns[[i]]$nodes
     
-    list(nodes = nodes, connection_percentage = mean_connection_percentage)
-  })
+    is_subset <- FALSE
+    for (fp in final_patterns) {
+      if (all(current_nodes %in% fp$nodes)) {
+        is_subset <- TRUE
+        break
+      }
+    }
+    
+    if (!is_subset) {
+      final_patterns[[length(final_patterns) + 1]] <- identified_patterns[[i]]
+    }
+  }
   
   return(final_patterns)
-
-  
-  
 }
 
 # Run the application 
