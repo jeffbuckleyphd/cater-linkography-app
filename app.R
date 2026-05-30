@@ -27,14 +27,19 @@ ui <- page_navbar(
     fg = "#2d3436",
     primary = "#0A4F57",
     secondary = "#06AED5",
-    base_font = font_google("Inter"),
-    heading_font = font_google("Outfit")
+    base_font = "Inter",
+    heading_font = "Outfit"
   ),
   
   header = tagList(
     useShinyjs(),
     
     tags$head(
+      
+      tags$link(rel = "preconnect", href = "https://fonts.googleapis.com"),
+      tags$link(rel = "preconnect", href = "https://fonts.gstatic.com", crossorigin = "anonymous"),
+      tags$link(href = "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=Outfit:wght@400;700;800;850&display=swap", rel = "stylesheet"),
+      
       tags$style(HTML("
       :root {
         --cater-midnight: #0A4F57;
