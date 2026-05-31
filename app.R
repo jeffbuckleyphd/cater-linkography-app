@@ -15,6 +15,13 @@ library(reactable)
 library(shinyWidgets)
 library(writexl)
 
+# Workaround for Chromium Issue 468227 (Fixes Shinylive .htm download bug)
+downloadButton <- function(...) {
+  tag <- shiny::downloadButton(...)
+  tag$attribs$download <- NULL
+  tag
+}
+
 # Define UI for the application
 ui <- page_navbar(
   title = div(
