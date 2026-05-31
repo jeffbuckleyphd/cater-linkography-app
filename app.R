@@ -12,12 +12,13 @@ library(stringr)
 library(purrr)
 library(openxlsx)
 library(reactable)
+library(shinyWidgets)
 
 # Define UI for the application
 ui <- page_navbar(
   title = div(
     class = "brand-title",
-    "CATER",
+    "Open",
     span("Linkography")
   ),
   
@@ -108,8 +109,8 @@ ui <- page_navbar(
 
       .brand-title span {
         font-weight: 500;
-        color: #5B6770;
-        margin-left: 4px;
+        color: var(--cater-salmon);
+        margin-left: 0px;
       }
 
       .bslib-page-navbar {
@@ -560,6 +561,7 @@ ui <- page_navbar(
           actionButton("tool_base", label = NULL, icon = icon("sliders-h"), class = "tool-button", title = "Base plot"),
           actionButton("tool_labels", label = NULL, icon = icon("font"), class = "tool-button", title = "Move labels"),
           actionButton("tool_overlays", label = NULL, icon = icon("layer-group"), class = "tool-button", title = "Overlays"),
+          actionButton("tool_sawtooth", label = NULL, icon = icon("wave-square"), class = "tool-button", title = "Sawtooth"),
           actionButton("tool_webchunk", label = NULL, icon = icon("sitemap"), class = "tool-button", title = "Web and chunk"),
           actionButton("tool_archio", label = NULL, icon = icon("rainbow"), class = "tool-button", title = "Archiograph"),
           actionButton("tool_trace", label = NULL, icon = icon("route"), class = "tool-button", title = "Trace pathways"),
@@ -700,16 +702,29 @@ ui <- page_navbar(
                   condition = "input.showBidirectional",
                   colourpicker::colourInput("bidirectionalColor", "Bidirectional line colour", value = "green"),
                   sliderInput("bidirectionalWeight", "Bidirectional line weight", min = 0.5, max = 3, value = 2, step = 0.1)
-                ),
+                )
+              ),
+              
+              # Paste this right after the closing parenthesis of the "webchunk" tabPanel
+              
+              tabPanel(
+                title = "Sawtooth",
+                value = "sawtooth",
                 
-                div(class = "settings-section-title", "Sawtooth"),
+                div(class = "settings-section-title", "Sawtooth analysis"),
                 
-                checkboxInput("showSawtooth", "Show sawtooth pattern", value = FALSE),
+                checkboxInput("showSawtooth", "Show sawtooth patterns", value = FALSE),
                 
                 conditionalPanel(
                   condition = "input.showSawtooth",
-                  colourpicker::colourInput("sawtoothColor", "Sawtooth line colour", value = "red"),
-                  sliderInput("sawtoothWeight", "Sawtooth line weight", min = 0.5, max = 3, value = 2, step = 0.1)
+                  div(class = "settings-section-title", "Master Styling"),
+                  checkboxInput("globalSawtoothStyle", "Apply master style to all sawtooths", value = TRUE),
+                  colourpicker::colourInput("sawtoothGlobalColor", "Master colour", value = "red"),
+                  sliderInput("sawtoothGlobalWeight", "Master line weight", min = 0.5, max = 5, value = 2, step = 0.1),
+                  
+                  hr(),
+                  div(class = "settings-section-title", "Identified Sawtooths"),
+                  uiOutput("sawtoothResultsUI")
                 )
               ),
               
@@ -884,11 +899,17 @@ ui <- page_navbar(
             card_header("Classification settings"),
             card_body(
               # ---> NEW: Multi-select dropdown for variables <---
-              selectizeInput(
-                "quantGroupVars",
-                "Group data by (select one or more):",
+              pickerInput(
+                inputId = "quantGroupVars",
+                label = "Group data by (select one or more):",
                 choices = NULL,
-                multiple = TRUE
+                multiple = TRUE,
+                options = list(
+                  `actions-box` = TRUE,          # Adds 'Select All' / 'Deselect All' buttons
+                  `selected-text-format` = "count > 2", # Cleans up the display if they select lots of variables
+                  `live-search` = TRUE,           # Keeps the search functionality!
+                  container = "body"
+                )
               ),
               # ---> NEW: Dedicated download button <---
               downloadButton(
@@ -929,11 +950,17 @@ ui <- page_navbar(
             class = "control-card",
             card_header("Critical move settings"),
             card_body(
-              selectizeInput(
-                "cmGroupVars",
-                "Group data by (select one or more):",
+              pickerInput(
+                inputId = "cmGroupVars",
+                label = "Group data by (select one or more):",
                 choices = NULL,
-                multiple = TRUE
+                multiple = TRUE,
+                options = list(
+                  `actions-box` = TRUE,
+                  `selected-text-format` = "count > 2",
+                  `live-search` = TRUE,
+                  container = "body"
+                )
               ),
               numericInput(
                 "selectedCmThreshold",
@@ -969,14 +996,18 @@ ui <- page_navbar(
   nav_spacer(),
   
   nav_item(
-    tags$div(
-      style = "font-size: 0.75rem; color: #5B6770; line-height: 1.3; text-align: right; margin-top: 4px;",
-      tags$strong("Centre for the Advancement of Technology Education Research"), tags$br(),
+    tags$a(
+      href = "https://www.cater-network.com", 
+      target = "_blank", 
+      # We add 'display: block;' and 'text-decoration: none;' so it behaves like the old div
+      style = "display: block; font-size: 0.75rem; color: #5B6770; line-height: 1.3; text-align: right; margin-top: 4px; text-decoration: none;",
+      
+      tags$strong("CATER: Centre for the Advancement of Technology Education Research"), tags$br(),
       "Developed by ",
-      tags$a(
-        href = "https://www.cater-network.com", 
-        target = "_blank", 
-        style = "color: var(--cater-midnight); text-decoration: none; font-weight: 700;",
+      
+      # The names are now just a styled span since the whole block is already a link
+      tags$span(
+        style = "color: var(--cater-midnight); font-weight: 700;",
         "Nicolaas Blom & Jeffrey Buckley"
       )
     )
@@ -1651,6 +1682,7 @@ summarise_directional_critical_moves_overall <- function(moves_with_direction_cl
   directional_critical_move_counts <- directional_critical_moves %>%
     dplyr::group_by(critical_move_threshold) %>%
     dplyr::summarise(
+      n_total_moves = dplyr::n(),
       total_critical_moves = sum(is_cm_any_direction, na.rm = TRUE),
       
       n_cm_forward_only = sum(is_cm_forward & !is_cm_backward, na.rm = TRUE),
@@ -1681,6 +1713,7 @@ summarise_directional_critical_moves_overall <- function(moves_with_direction_cl
   counts_long <- directional_critical_move_counts %>%
     dplyr::select(
       critical_move_threshold,
+      n_total_moves,
       total_critical_moves,
       n_cm_forward_only,
       n_cm_backward_only,
@@ -1733,10 +1766,15 @@ summarise_directional_critical_moves_overall <- function(moves_with_direction_cl
       percent_critical_moves = dplyr::case_when(
         total_critical_moves > 0 ~ n_critical_moves / total_critical_moves * 100,
         TRUE ~ 0
+      ),
+      percent_total_moves = dplyr::case_when( # <--- NEW: Calculate new column
+        n_total_moves > 0 ~ n_critical_moves / n_total_moves * 100,
+        TRUE ~ 0
       )
     ) %>%
     dplyr::arrange(
       critical_move_threshold,
+      n_total_moves,
       cm_type
     ) %>%
     dplyr::select(
@@ -1745,6 +1783,7 @@ summarise_directional_critical_moves_overall <- function(moves_with_direction_cl
       cm_type,
       n_critical_moves,
       percent_critical_moves,
+      percent_total_moves,
       move_numbers
     )
   
@@ -1938,6 +1977,10 @@ summarise_directional_critical_moves_by_variables <- function(moves_with_directi
         percent_critical_moves = dplyr::case_when(
           total_critical_moves > 0 ~ n_critical_moves / total_critical_moves * 100,
           TRUE ~ 0
+        ),
+        percent_total_moves = dplyr::case_when( # <--- NEW: Calculate new column
+          n_total_moves_in_category > 0 ~ n_critical_moves / n_total_moves_in_category * 100,
+          TRUE ~ 0
         )
       ) %>%
       dplyr::arrange(
@@ -1955,6 +1998,7 @@ summarise_directional_critical_moves_by_variables <- function(moves_with_directi
         cm_type,
         n_critical_moves,
         percent_critical_moves,
+        percent_total_moves,
         move_numbers
       )
   }
@@ -2297,6 +2341,10 @@ server <- function(input, output, session) {
   
   observeEvent(input$tool_overlays, {
     switch_settings_panel("overlays", "tool_overlays")
+  })
+  
+  observeEvent(input$tool_sawtooth, {
+    switch_settings_panel("sawtooth", "tool_sawtooth")
   })
   
   observeEvent(input$tool_webchunk, {
@@ -2678,6 +2726,7 @@ server <- function(input, output, session) {
       uni_backward_moves = uni_backward_moves,
       bidirectional_moves = bidirectional_moves,
       sawtooth_sequence = sawtooth_sequence,
+      sawtooth_patterns_list = sawtooth_patterns,
       link_index = link_index,
       total_moves = total_moves,
       critical_move_a = critical_move_a,
@@ -2751,9 +2800,9 @@ server <- function(input, output, session) {
     exclude_cols <- c("move", "from", "to", "x", "y") 
     cat_cols <- setdiff(names(moves), exclude_cols)
     
-    # Load them instantly
-    updateSelectizeInput(session, "quantGroupVars", choices = cat_cols, selected = cat_cols)
-    updateSelectizeInput(session, "cmGroupVars", choices = cat_cols, selected = cat_cols) # <--- NEW
+    # Load them instantly using the new picker functions
+    updatePickerInput(session, "quantGroupVars", choices = cat_cols, selected = cat_cols)
+    updatePickerInput(session, "cmGroupVars", choices = cat_cols, selected = cat_cols) 
   })
   
   # Output the number of unique factors and dynamically generate color pickers
@@ -3259,6 +3308,48 @@ server <- function(input, output, session) {
     tagList(list_ui, do.call(tagList, chunk_ui))
   })
   
+  # Dynamically generate UI controls for identified Sawtooth patterns
+  output$sawtoothResultsUI <- renderUI({
+    req(processed_data())
+    patterns <- processed_data()$sawtooth_patterns_list
+    
+    if (length(patterns) == 0) {
+      return(tags$p("No sawtooth patterns found.", style = "color: #FA8072; font-weight: bold; font-size: 0.85rem;"))
+    }
+    
+    # 1. UI for when Global Styling is OFF (Individual controls)
+    chunk_ui <- lapply(seq_along(patterns), function(i) {
+      pattern <- patterns[[i]]
+      move_range <- paste(min(pattern), "-", max(pattern))
+      
+      conditionalPanel(
+        condition = "!input.globalSawtoothStyle",
+        div(
+          style = "background: #F6F7F9; padding: 12px; border-radius: 12px; margin-bottom: 12px; border: 1px solid #E7EAEE;",
+          h6(paste("Sawtooth", i, ": Moves", move_range), style = "margin-top: 0; color: var(--cater-midnight); font-weight: 800; font-size: 0.85rem;"),
+          colourpicker::colourInput(paste0("sawtoothColor_", i), "Colour", value = "red"),
+          sliderInput(paste0("sawtoothWeight_", i), "Line Weight", min = 0.5, max = 5, value = 2, step = 0.1)
+        )
+      )
+    })
+    
+    # 2. UI for when Global Styling is ON (Clean list summary)
+    list_ui <- conditionalPanel(
+      condition = "input.globalSawtoothStyle",
+      tags$ul(
+        style = "padding-left: 20px; font-size: 0.82rem; color: var(--cater-midnight); font-weight: 600;",
+        lapply(seq_along(patterns), function(i) {
+          pattern <- patterns[[i]]
+          tags$li(
+            paste0("Sawtooth ", i, ": Moves ", paste(pattern, collapse = ", "))
+          )
+        })
+      )
+    )
+    
+    tagList(list_ui, do.call(tagList, chunk_ui))
+  })
+  
   # Render the interactive plot
   plotToExport <- reactive({
     req(scaled_connections_df())
@@ -3413,24 +3504,42 @@ server <- function(input, output, session) {
     
     # Sawtooth highlight
     if (isTRUE(input$showSawtooth)) {
-      sawtooth_df <- connections_df %>%
-        filter(sawtooth_role == "Middle Moves")
+      patterns_st <- processed_data()$sawtooth_patterns_list
       
-      p <- p +
-        geom_segment(
-          data = sawtooth_df,
-          aes(x = from_x, xend = mid_x, y = 0, yend = mid_y_scaled),
-          colour = input$sawtoothColor,
-          linewidth = input$sawtoothWeight,
-          lineend = "round"
-        ) +
-        geom_segment(
-          data = sawtooth_df,
-          aes(x = to_x, xend = mid_x, y = 0, yend = mid_y_scaled),
-          colour = input$sawtoothColor,
-          linewidth = input$sawtoothWeight,
-          lineend = "round"
-        )
+      for (i in seq_along(patterns_st)) {
+        pattern <- patterns_st[[i]]
+        
+        # Determine styling based on the toggle
+        if (isTRUE(input$globalSawtoothStyle)) {
+          c_color <- input$sawtoothGlobalColor %||% "red"
+          c_weight <- input$sawtoothGlobalWeight %||% 2
+        } else {
+          c_color <- input[[paste0("sawtoothColor_", i)]] %||% "red"
+          c_weight <- input[[paste0("sawtoothWeight_", i)]] %||% 2
+        }
+        
+        # Filter connections specifically for the moves in this sawtooth chunk
+        chunk_df <- connections_df %>%
+          filter(from %in% pattern & to %in% pattern)
+        
+        if (nrow(chunk_df) > 0) {
+          p <- p +
+            geom_segment(
+              data = chunk_df,
+              aes(x = from_x, xend = mid_x, y = 0, yend = mid_y_scaled),
+              colour = c_color,
+              linewidth = c_weight,
+              lineend = "round"
+            ) +
+            geom_segment(
+              data = chunk_df,
+              aes(x = to_x, xend = mid_x, y = 0, yend = mid_y_scaled),
+              colour = c_color,
+              linewidth = c_weight,
+              lineend = "round"
+            )
+        }
+      }
     }
     
     # Trace Forward Highlights
