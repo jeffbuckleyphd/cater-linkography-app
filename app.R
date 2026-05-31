@@ -13,6 +13,7 @@ library(purrr)
 library(openxlsx)
 library(reactable)
 library(shinyWidgets)
+library(writexl)
 
 # Define UI for the application
 ui <- page_navbar(
@@ -569,7 +570,7 @@ ui <- page_navbar(
           
           div(class = "tool-spacer"),
           
-          actionButton("tool_export", label = NULL, icon = icon("file-pdf"), class = "tool-button", title = "Export")
+          actionButton("tool_export", label = NULL, icon = icon("file-export"), class = "tool-button", title = "Export")
         ),
         
         div(
@@ -826,14 +827,30 @@ ui <- page_navbar(
                 
                 div(
                   class = "control-pair",
-                  numericInput("pdfWidth", "PDF width (mm)", value = 297, min = 1),
-                  numericInput("pdfHeight", "PDF height (mm)", value = 210, min = 1)
+                  numericInput("pdfWidth", "Image width (mm)", value = 297, min = 1),
+                  numericInput("pdfHeight", "Image height (mm)", value = 210, min = 1)
                 ),
                 
                 # ---> NEW: Export Scale adjustment <---
                 sliderInput("pdfScale", "Element scaling (increase to make lines thinner in pdf)", min = 0.5, max = 4, value = 1.5, step = 0.1),
                 
-                downloadButton("downloadPlot", "Download plot as PDF", class = "btn-primary")
+                numericInput("imageDpi", "Raster resolution (DPI)", value = 300, min = 72, max = 1200, step = 10),
+                
+                div(
+                  style = "display: flex; gap: 10px; margin-top: 15px;",
+                  downloadButton(
+                    "downloadPlot", 
+                    "Download PDF", 
+                    class = "btn-primary", 
+                    style = "flex: 1; text-align: center; padding: 6px 12px; font-size: 0.8rem; display: flex; align-items: center; justify-content: center; gap: 8px; height: 38px;"
+                  ),
+                  downloadButton(
+                    "downloadPlotJPG", 
+                    "Download JPG", 
+                    class = "btn-primary", 
+                    style = "flex: 1; text-align: center; padding: 6px 12px; font-size: 0.8rem; display: flex; align-items: center; justify-content: center; gap: 8px; height: 38px;"
+                  )
+                )
               )
             )
           )
@@ -1042,6 +1059,58 @@ clean_df_names <- function(df) {
     names(df) <- new_names
   }
   return(df)
+}
+
+# Helper function to stack multiple tables into a single data frame for writexl
+stack_tables_for_writexl <- function(table_list) {
+  if (length(table_list) == 0) return(data.frame(Note = "No data available"))
+  
+  # 1. Find the maximum number of columns needed across all tables
+  max_cols <- max(sapply(table_list, ncol))
+  generic_col_names <- paste0("Col_", 1:max_cols)
+  
+  stacked_list <- list()
+  
+  for (table_name in names(table_list)) {
+    current_table <- table_list[[table_name]]
+    
+    # Convert everything to character to avoid class conflicts (e.g., numeric vs character)
+    current_table[] <- lapply(current_table, as.character)
+    original_headers <- names(current_table)
+    
+    # Pad with empty columns if this table is narrower than max_cols
+    if (ncol(current_table) < max_cols) {
+      padding <- as.data.frame(matrix(NA_character_, nrow = nrow(current_table), ncol = max_cols - ncol(current_table)))
+      current_table <- cbind(current_table, padding)
+    }
+    names(current_table) <- generic_col_names
+    
+    # Create Title Row (Table name in first column)
+    title_row <- as.data.frame(matrix(NA_character_, nrow = 1, ncol = max_cols))
+    names(title_row) <- generic_col_names
+    title_row[1, 1] <- paste("---", toupper(table_name), "---") 
+    
+    # Create Header Row (Original column names)
+    header_row <- as.data.frame(matrix(NA_character_, nrow = 1, ncol = max_cols))
+    names(header_row) <- generic_col_names
+    header_row[1, 1:length(original_headers)] <- original_headers
+    
+    # Create Spacer Row
+    spacer_row <- as.data.frame(matrix(NA_character_, nrow = 1, ncol = max_cols))
+    names(spacer_row) <- generic_col_names
+    
+    # Bind them together
+    stacked_list[[length(stacked_list) + 1]] <- dplyr::bind_rows(title_row, header_row, current_table, spacer_row)
+  }
+  
+  # Combine the full list into one massive data frame
+  final_df <- dplyr::bind_rows(stacked_list)
+  
+  # Give the final data frame "invisible" unique column names (writexl requires unique names)
+  # Using different amounts of blank spaces to keep them unique but invisible in Excel
+  names(final_df) <- strrep(" ", 1:max_cols)
+  
+  return(final_df)
 }
 
 read_linkography <- function(file, sheet = 1) {
@@ -3071,58 +3140,30 @@ server <- function(input, output, session) {
       req(processed_data())
       pd <- processed_data()
       
-      wb <- openxlsx::createWorkbook()
+      # 1. Process the multi-table lists using our new stacking function
+      stacked_undirected <- stack_tables_for_writexl(pd$undirected_link_matrices_by_variable)
+      stacked_directed <- stack_tables_for_writexl(pd$link_matrices_by_variable)
       
-      openxlsx::addWorksheet(wb, "Summary")
-      openxlsx::writeData(wb, "Summary", pd$linkography_summary)
-      
-      openxlsx::addWorksheet(wb, "Descriptive Statistics")
-      openxlsx::writeData(wb, "Descriptive Statistics", pd$descriptive_statistics)
-      
-      openxlsx::addWorksheet(wb, "Link Span")
-      openxlsx::writeData(wb, "Link Span", pd$distance_table)
-      
-      openxlsx::addWorksheet(wb, "Inter Intra Links")
-      openxlsx::writeData(wb, "Inter Intra Links", pd$inter_intra_links_by_variable)
-      
-      openxlsx::addWorksheet(wb, "Move Direction Counts")
-      openxlsx::writeData(wb, "Move Direction Counts", pd$move_direction_counts)
-      
-      openxlsx::addWorksheet(wb, "Move Direction Classification")
-      openxlsx::writeData(wb, "Move Direction Classification", pd$moves_with_direction_classification)
-      
-      openxlsx::addWorksheet(wb, "Move Direction by Variable")
-      openxlsx::writeData(wb, "Move Direction by Variable", pd$move_direction_by_variable_wide)
-      
-      openxlsx::addWorksheet(wb, "CM Ranking List")
-      openxlsx::writeData(wb, "CM Ranking List", pd$directional_scores)
-      
-      openxlsx::addWorksheet(wb, "CM Threshold List")
-      openxlsx::writeData(wb, "CM Threshold List", pd$directional_cm_thresholds)
-      
-      openxlsx::addWorksheet(wb, "CM Move Counts")
-      openxlsx::writeData(wb, "CM Move Counts", pd$directional_critical_move_counts)
-      
-      openxlsx::addWorksheet(wb, "CM Counts by Variable")
-      openxlsx::writeData(wb, "CM Counts by Variable", pd$directional_critical_moves_by_variable)
-      
-      write_list_of_tables_to_sheet(
-        wb = wb,
-        sheet_name = "Undirected Link Matrices",
-        table_list = pd$undirected_link_matrices_by_variable
+      # 2. Build a named list of all sheets. 
+      # The names of the list become the exact Excel sheet names.
+      sheets_to_export <- list(
+        "Summary" = pd$linkography_summary,
+        "Descriptive Statistics" = pd$descriptive_statistics,
+        "Link Span" = pd$distance_table,
+        "Inter Intra Links" = pd$inter_intra_links_by_variable,
+        "Move Direction Counts" = pd$move_direction_counts,
+        "Move Direction Class" = pd$moves_with_direction_classification,
+        "Move Dir by Variable" = pd$move_direction_by_variable_wide,
+        "CM Ranking List" = pd$directional_scores,
+        "CM Threshold List" = pd$directional_cm_thresholds,
+        "CM Move Counts" = pd$directional_critical_move_counts,
+        "CM Counts by Variable" = pd$directional_critical_moves_by_variable,
+        "Undirected Link Matrices" = stacked_undirected,
+        "Directed Link Matrices" = stacked_directed
       )
       
-      write_list_of_tables_to_sheet(
-        wb = wb,
-        sheet_name = "Directed Link Matrices",
-        table_list = pd$link_matrices_by_variable
-      )
-      
-      openxlsx::saveWorkbook(
-        wb,
-        file = file,
-        overwrite = TRUE
-      )
+      # 3. Write it out perfectly compiled for WebAssembly
+      writexl::write_xlsx(sheets_to_export, path = file)
     }
   )
   
@@ -3135,58 +3176,29 @@ server <- function(input, output, session) {
       req(processed_data())
       pd <- processed_data()
       
-      wb <- openxlsx::createWorkbook()
+      # 1. Process the multi-table lists using the stacking function
+      stacked_undirected <- stack_tables_for_writexl(pd$undirected_link_matrices_by_variable)
+      stacked_directed <- stack_tables_for_writexl(pd$link_matrices_by_variable)
       
-      openxlsx::addWorksheet(wb, "Summary")
-      openxlsx::writeData(wb, "Summary", pd$linkography_summary)
-      
-      openxlsx::addWorksheet(wb, "Descriptive Statistics")
-      openxlsx::writeData(wb, "Descriptive Statistics", pd$descriptive_statistics)
-      
-      openxlsx::addWorksheet(wb, "Link Span")
-      openxlsx::writeData(wb, "Link Span", pd$distance_table)
-      
-      openxlsx::addWorksheet(wb, "Inter Intra Links")
-      openxlsx::writeData(wb, "Inter Intra Links", pd$inter_intra_links_by_variable)
-      
-      openxlsx::addWorksheet(wb, "Move Direction Counts")
-      openxlsx::writeData(wb, "Move Direction Counts", pd$move_direction_counts)
-      
-      openxlsx::addWorksheet(wb, "Move Direction Classification")
-      openxlsx::writeData(wb, "Move Direction Classification", pd$moves_with_direction_classification)
-      
-      openxlsx::addWorksheet(wb, "Move Direction by Variable")
-      openxlsx::writeData(wb, "Move Direction by Variable", pd$move_direction_by_variable_wide)
-      
-      openxlsx::addWorksheet(wb, "CM Ranking List")
-      openxlsx::writeData(wb, "CM Ranking List", pd$directional_scores)
-      
-      openxlsx::addWorksheet(wb, "CM Threshold List")
-      openxlsx::writeData(wb, "CM Threshold List", pd$directional_cm_thresholds)
-      
-      openxlsx::addWorksheet(wb, "CM Move Counts")
-      openxlsx::writeData(wb, "CM Move Counts", pd$directional_critical_move_counts)
-      
-      openxlsx::addWorksheet(wb, "CM Counts by Variable")
-      openxlsx::writeData(wb, "CM Counts by Variable", pd$directional_critical_moves_by_variable)
-      
-      write_list_of_tables_to_sheet(
-        wb = wb,
-        sheet_name = "Undirected Link Matrices",
-        table_list = pd$undirected_link_matrices_by_variable
+      # 2. Build a named list of all sheets. 
+      sheets_to_export <- list(
+        "Summary" = pd$linkography_summary,
+        "Descriptive Statistics" = pd$descriptive_statistics,
+        "Link Span" = pd$distance_table,
+        "Inter Intra Links" = pd$inter_intra_links_by_variable,
+        "Move Direction Counts" = pd$move_direction_counts,
+        "Move Direction Class" = pd$moves_with_direction_classification,
+        "Move Dir by Variable" = pd$move_direction_by_variable_wide,
+        "CM Ranking List" = pd$directional_scores,
+        "CM Threshold List" = pd$directional_cm_thresholds,
+        "CM Move Counts" = pd$directional_critical_move_counts,
+        "CM Counts by Variable" = pd$directional_critical_moves_by_variable,
+        "Undirected Link Matrices" = stacked_undirected,
+        "Directed Link Matrices" = stacked_directed
       )
       
-      write_list_of_tables_to_sheet(
-        wb = wb,
-        sheet_name = "Directed Link Matrices",
-        table_list = pd$link_matrices_by_variable
-      )
-      
-      openxlsx::saveWorkbook(
-        wb,
-        file = file,
-        overwrite = TRUE
-      )
+      # 3. Write it out cleanly using writexl
+      writexl::write_xlsx(sheets_to_export, path = file)
     }
   )
   
@@ -3708,8 +3720,7 @@ server <- function(input, output, session) {
           data = connections_df,
           aes(x = mid_x, y = mid_y_scaled),
           size = input$midPointSize,
-          colour = input$midPointColor,
-          alpha = 0.75
+          colour = input$midPointColor
         )
     }
     
@@ -3808,13 +3819,30 @@ server <- function(input, output, session) {
       paste0("linkgraphy-plot-", format(Sys.time(), "%Y-%m-%d_%H-%M-%S"), ".pdf")
     },
     content = function(file) {
-      # Removed cairo_pdf device to ensure compatibility with WebR/Shinylive
       ggsave(file, 
-             plot = plotToExport(), 
+             plot = plotToExport(),
+             device = "pdf",
              width = input$pdfWidth, 
              height = input$pdfHeight, 
              units = "mm",
-             scale = input$pdfScale) # <--- NEW: Applies the scaling slider
+             scale = input$pdfScale)
+    }
+  )
+  
+  output$downloadPlotJPG <- downloadHandler(
+    filename = function() {
+      paste0("linkgraphy-plot-", format(Sys.time(), "%Y-%m-%d_%H-%M-%S"), ".jpg")
+    },
+    content = function(file) {
+      ggsave(file, 
+             plot = plotToExport(), 
+             device = "jpeg",
+             width = input$pdfWidth, 
+             height = input$pdfHeight, 
+             units = "mm",
+             scale = input$pdfScale,
+             dpi = input$imageDpi,
+             bg = "white")
     }
   )
 }
