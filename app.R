@@ -930,11 +930,9 @@ ui <- page_navbar(
               numericInput("spanCutoff1_abs", "Short to Medium Cutoff", value = 1, min = 1),
               numericInput("spanCutoff2_abs", "Medium to Long Cutoff", value = 2, min = 1),
               
-              helpText("Updating percentiles auto-calculates absolute moves, and vice versa. Medium/Long cutoff is capped at Max Span - 1."),
-              br(),
               downloadButton(
                 "downloadSpanOutputs",
-                "Download Link Span Outputs",
+                "Download all outputs as Excel",
                 class = "btn-primary"
               )
             )
