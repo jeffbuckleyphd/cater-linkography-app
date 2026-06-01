@@ -903,10 +903,55 @@ ui <- page_navbar(
     "Link Span",
     div(
       class = "table-page",
-      card(
-        class = "plot-card",
-        card_header("Link span table"),
-        card_body(reactableOutput("linkSpanTable"))
+      layout_sidebar(
+        sidebar = sidebar(
+          width = 320,
+          card(
+            class = "control-card",
+            card_header("Link span settings"),
+            card_body(
+              
+              # ---> NEW: Modern segmented toggle / slider <---
+              radioGroupButtons(
+                inputId = "spanThresholdMode",
+                label = "Input Mode:",
+                choices = c("Percentile" = "percentile", "Absolute" = "absolute"),
+                selected = "percentile",
+                justified = TRUE,
+                status = "primary",
+                size = "sm"
+              ),
+              
+              div(class = "settings-section-title", "Percentile Thresholds"),
+              numericInput("spanCutoff1_perc", "Short to Medium (%)", value = 25, min = 1, max = 99),
+              numericInput("spanCutoff2_perc", "Medium to Long (%)", value = 75, min = 1, max = 99),
+              
+              div(class = "settings-section-title", "Absolute Thresholds (Moves)"),
+              numericInput("spanCutoff1_abs", "Short to Medium Cutoff", value = 1, min = 1),
+              numericInput("spanCutoff2_abs", "Medium to Long Cutoff", value = 2, min = 1),
+              
+              helpText("Updating percentiles auto-calculates absolute moves, and vice versa. Medium/Long cutoff is capped at Max Span - 1."),
+              br(),
+              downloadButton(
+                "downloadSpanOutputs",
+                "Download Link Span Outputs",
+                class = "btn-primary"
+              )
+            )
+          )
+        ),
+        card(
+          class = "plot-card",
+          card_header("Link span outputs"),
+          card_body(
+            tabsetPanel(
+              tabPanel("Overall Statistics", reactableOutput("spanOverallStatsTable")),
+              tabPanel("Span Categories", reactableOutput("spanCategoriesTable")),
+              tabPanel("Move-Level Summary", reactableOutput("spanMoveLevelTable")),
+              tabPanel("Distance Matrix", reactableOutput("linkSpanTable"))
+            )
+          )
+        )
       )
     )
   ),
@@ -2832,6 +2877,284 @@ server <- function(input, output, session) {
     )
   })
   
+  # --- UI Sync for Link Span Thresholds ---
+  # Helper to get current distance stats cleanly
+  span_stats <- reactive({
+    req(processed_data())
+    conn <- processed_data()$connections_df
+    if(nrow(conn) == 0) return(NULL)
+    dists <- conn$distance
+    list(
+      max_dist = max(dists, na.rm = TRUE),
+      dists = dists,
+      ecdf_fun = ecdf(dists)
+    )
+  })
+  
+  # Visually disable the inactive inputs so the user knows which ones to type in
+  observeEvent(input$spanThresholdMode, {
+    if (input$spanThresholdMode == "percentile") {
+      shinyjs::enable("spanCutoff1_perc")
+      shinyjs::enable("spanCutoff2_perc")
+      shinyjs::disable("spanCutoff1_abs")
+      shinyjs::disable("spanCutoff2_abs")
+    } else {
+      shinyjs::disable("spanCutoff1_perc")
+      shinyjs::disable("spanCutoff2_perc")
+      shinyjs::enable("spanCutoff1_abs")
+      shinyjs::enable("spanCutoff2_abs")
+    }
+  })
+  
+  # When new data loads, initialize the max cap and sync to defaults
+  observeEvent(span_stats(), {
+    stats <- span_stats()
+    req(stats)
+    
+    cap <- max(1, stats$max_dist - 1)
+    updateNumericInput(session, "spanCutoff2_abs", max = cap)
+    
+    # Sync from default percentiles to absolute on first load
+    p1 <- if (is.null(input$spanCutoff1_perc) || is.na(input$spanCutoff1_perc)) 25 else input$spanCutoff1_perc
+    p2 <- if (is.null(input$spanCutoff2_perc) || is.na(input$spanCutoff2_perc)) 75 else input$spanCutoff2_perc
+    
+    new_abs1 <- round(quantile(stats$dists, p1 / 100, na.rm = TRUE, names = FALSE))
+    new_abs2 <- round(quantile(stats$dists, p2 / 100, na.rm = TRUE, names = FALSE))
+    
+    if (new_abs2 > cap) new_abs2 <- cap
+    if (new_abs1 > new_abs2) new_abs1 <- new_abs2
+    
+    updateNumericInput(session, "spanCutoff1_abs", value = new_abs1)
+    updateNumericInput(session, "spanCutoff2_abs", value = new_abs2)
+  })
+  
+  # Sync: Percentile -> Absolute
+  observeEvent(c(input$spanCutoff1_perc, input$spanCutoff2_perc), {
+    req(input$spanThresholdMode == "percentile")
+    
+    stats <- span_stats()
+    req(stats)
+    
+    p1 <- if (is.null(input$spanCutoff1_perc) || is.na(input$spanCutoff1_perc)) 25 else input$spanCutoff1_perc
+    p2 <- if (is.null(input$spanCutoff2_perc) || is.na(input$spanCutoff2_perc)) 75 else input$spanCutoff2_perc
+    
+    new_abs1 <- round(quantile(stats$dists, p1 / 100, na.rm = TRUE, names = FALSE))
+    new_abs2 <- round(quantile(stats$dists, p2 / 100, na.rm = TRUE, names = FALSE))
+    
+    cap <- max(1, stats$max_dist - 1)
+    if (new_abs2 > cap) new_abs2 <- cap
+    if (new_abs1 > new_abs2) new_abs1 <- new_abs2
+    
+    if (!isTRUE(all.equal(input$spanCutoff1_abs, new_abs1))) {
+      updateNumericInput(session, "spanCutoff1_abs", value = new_abs1)
+    }
+    if (!isTRUE(all.equal(input$spanCutoff2_abs, new_abs2))) {
+      updateNumericInput(session, "spanCutoff2_abs", value = new_abs2)
+    }
+  }, ignoreInit = TRUE)
+  
+  # Sync: Absolute -> Percentile
+  observeEvent(c(input$spanCutoff1_abs, input$spanCutoff2_abs), {
+    req(input$spanThresholdMode == "absolute")
+    
+    stats <- span_stats()
+    req(stats)
+    
+    a1 <- if (is.null(input$spanCutoff1_abs) || is.na(input$spanCutoff1_abs)) 1 else input$spanCutoff1_abs
+    a2 <- if (is.null(input$spanCutoff2_abs) || is.na(input$spanCutoff2_abs)) 2 else input$spanCutoff2_abs
+    
+    cap <- max(1, stats$max_dist - 1)
+    
+    # ---> THE FIX: Snap the UI back if the user types an impossible number
+    safe_a2 <- min(a2, cap)
+    safe_a1 <- min(a1, safe_a2)
+    
+    if (a2 > cap) {
+      updateNumericInput(session, "spanCutoff2_abs", value = safe_a2)
+    }
+    if (a1 > safe_a2) {
+      updateNumericInput(session, "spanCutoff1_abs", value = safe_a1)
+    }
+    
+    # Calculate the new percentiles based on the safe numbers
+    new_p1 <- round(stats$ecdf_fun(safe_a1) * 100)
+    new_p2 <- round(stats$ecdf_fun(safe_a2) * 100)
+    
+    if (!isTRUE(all.equal(input$spanCutoff1_perc, new_p1))) {
+      updateNumericInput(session, "spanCutoff1_perc", value = new_p1)
+    }
+    if (!isTRUE(all.equal(input$spanCutoff2_perc, new_p2))) {
+      updateNumericInput(session, "spanCutoff2_perc", value = new_p2)
+    }
+  }, ignoreInit = TRUE)
+  
+  # --- Data Processing using the absolute thresholds ---
+  span_analysis_data <- reactive({
+    req(processed_data())
+    pd <- processed_data()
+    conn <- pd$connections_df
+    moves_df <- pd$moves_df
+    
+    if(nrow(conn) == 0) {
+      return(list(
+        overall_stats = empty_table("No links available."),
+        span_cats = empty_table("No links available."),
+        move_stats = empty_table("No links available.")
+      ))
+    }
+    
+    distances <- conn$distance
+    total_links <- length(distances)
+    
+    # Calculate exact frequencies for highly local spans
+    span_1_count <- sum(distances == 1, na.rm = TRUE)
+    span_2_count <- sum(distances == 2, na.rm = TRUE)
+    span_3_count <- sum(distances == 3, na.rm = TRUE)
+    
+    span_1_pct <- round((span_1_count / total_links) * 100, 2)
+    span_2_pct <- round((span_2_count / total_links) * 100, 2)
+    span_3_pct <- round((span_3_count / total_links) * 100, 2)
+    
+    # Quartiles for the boxplot stats
+    q1 <- quantile(distances, 0.25, na.rm = TRUE, names = FALSE)
+    q3 <- quantile(distances, 0.75, na.rm = TRUE, names = FALSE)
+    
+    # 1. Overall Stats
+    overall_stats <- tibble::tibble(
+      Statistic = c(
+        "Total Links",
+        "Mean Linkspan", 
+        "Median Linkspan", 
+        "Standard Deviation", 
+        "Minimum Span",
+        "1st Quartile (Q1)",
+        "3rd Quartile (Q3)",
+        "Interquartile Range (IQR)", 
+        "Maximum Span", 
+        "Links with Span = 1",
+        "Links with Span = 2",
+        "Links with Span = 3"
+      ),
+      Value = c(
+        as.character(total_links),
+        as.character(round(mean(distances, na.rm=TRUE), 2)),
+        as.character(round(median(distances, na.rm=TRUE), 2)),
+        as.character(round(sd(distances, na.rm=TRUE), 2)),
+        as.character(min(distances, na.rm=TRUE)),
+        as.character(q1),
+        as.character(q3),
+        as.character(round(IQR(distances, na.rm=TRUE), 2)),
+        as.character(max(distances, na.rm=TRUE)),
+        paste0(span_1_count, " (", span_1_pct, "%)"),
+        paste0(span_2_count, " (", span_2_pct, "%)"),
+        paste0(span_3_count, " (", span_3_pct, "%)")
+      )
+    )
+    
+    # 2. Span Categories
+    raw_c1 <- if(is.null(input$spanCutoff1_abs) || is.na(input$spanCutoff1_abs)) 1 else input$spanCutoff1_abs
+    raw_c2 <- if(is.null(input$spanCutoff2_abs) || is.na(input$spanCutoff2_abs)) 2 else input$spanCutoff2_abs
+    
+    max_dist <- max(distances, na.rm = TRUE)
+    cap <- max(1, max_dist - 1)
+    actual_c2 <- min(raw_c2, cap)
+    actual_c1 <- min(raw_c1, actual_c2)
+    
+    conn <- conn %>%
+      dplyr::mutate(
+        span_category = dplyr::case_when(
+          distance <= actual_c1 ~ "Short",
+          distance > actual_c1 & distance <= actual_c2 ~ "Medium",
+          distance > actual_c2 ~ "Long",
+          TRUE ~ "Unknown"
+        )
+      )
+    
+    span_cats <- conn %>%
+      dplyr::count(span_category) %>%
+      dplyr::mutate(Percentage = round(n / sum(n) * 100, 2)) %>%
+      dplyr::rename(Category = span_category, Count = n)
+    
+    # 3. Move-Level Mastery Table
+    fore <- conn %>%
+      dplyr::group_by(move = to) %>%
+      dplyr::summarise(
+        n_forelinks = dplyr::n(),
+        mean_forelink_span = round(mean(distance, na.rm=TRUE), 2),
+        median_forelink_span = round(median(distance, na.rm=TRUE), 2),
+        max_forelink_span = max(distance, na.rm=TRUE),
+        long_forelinks = sum(span_category == "Long", na.rm=TRUE),
+        medium_forelinks = sum(span_category == "Medium", na.rm=TRUE),
+        short_forelinks = sum(span_category == "Short", na.rm=TRUE)
+      )
+    
+    back <- conn %>%
+      dplyr::group_by(move = from) %>%
+      dplyr::summarise(
+        n_backlinks = dplyr::n(),
+        mean_backlink_span = round(mean(distance, na.rm=TRUE), 2),
+        median_backlink_span = round(median(distance, na.rm=TRUE), 2),
+        max_backlink_span = max(distance, na.rm=TRUE),
+        long_backlinks = sum(span_category == "Long", na.rm=TRUE),
+        medium_backlinks = sum(span_category == "Medium", na.rm=TRUE),
+        short_backlinks = sum(span_category == "Short", na.rm=TRUE)
+      )
+    
+    move_stats <- moves_df %>%
+      dplyr::select(move) %>%
+      dplyr::left_join(fore, by="move") %>%
+      dplyr::left_join(back, by="move") %>%
+      # Replace NA with 0 ONLY for the count-based metrics
+      dplyr::mutate(
+        dplyr::across(c(n_forelinks, long_forelinks, medium_forelinks, short_forelinks,
+                        n_backlinks, long_backlinks, medium_backlinks, short_backlinks), 
+                      ~tidyr::replace_na(.x, 0))
+      ) %>%
+      dplyr::mutate(
+        total_links = n_forelinks + n_backlinks,
+        net_directionality = n_forelinks - n_backlinks,
+        max_span_overall = suppressWarnings(pmax(max_forelink_span, max_backlink_span, na.rm=TRUE)),
+        max_span_overall = ifelse(is.infinite(max_span_overall), NA, max_span_overall),
+        total_long_links = long_forelinks + long_backlinks,
+        total_medium_links = medium_forelinks + medium_backlinks,
+        total_short_links = short_forelinks + short_backlinks
+      ) %>%
+      dplyr::select(
+        move,
+        max_span_overall,
+        total_links,
+        net_directionality,
+        n_forelinks, mean_forelink_span, median_forelink_span, max_forelink_span,
+        long_forelinks, medium_forelinks, short_forelinks,
+        n_backlinks, mean_backlink_span, median_backlink_span, max_backlink_span,
+        long_backlinks, medium_backlinks, short_backlinks,
+        total_long_links, total_medium_links, total_short_links
+      ) %>%
+      dplyr::arrange(dplyr::desc(max_span_overall))
+    
+    list(
+      overall_stats = clean_df_names(overall_stats),
+      span_cats = clean_df_names(span_cats),
+      move_stats = clean_df_names(move_stats)
+    )
+  })
+  
+  # Render the new tables
+  output$spanOverallStatsTable <- renderReactable({
+    req(span_analysis_data())
+    build_quant_table(span_analysis_data()$overall_stats, page_length = 15)
+  })
+  
+  output$spanCategoriesTable <- renderReactable({
+    req(span_analysis_data())
+    build_quant_table(span_analysis_data()$span_cats, page_length = 10)
+  })
+  
+  output$spanMoveLevelTable <- renderReactable({
+    req(span_analysis_data())
+    build_quant_table(span_analysis_data()$move_stats, page_length = 20)
+  })
+  
   
   # Update selectInput choices based on the columns of archiograph_moves_df
   observe({
@@ -3139,73 +3462,56 @@ server <- function(input, output, session) {
     build_quant_table(df, page_length = 20)
   })
   
-  output$downloadQuantOutputs <- downloadHandler(
-    filename = function() {
-      paste0("linkography_outputs-", format(Sys.time(), "%Y-%m-%d_%H-%M-%S"), ".xlsx")
-    },
+  # Master Export Function for all three tables
+  generate_master_export <- function(file, pd, span_data) {
+    stacked_undirected <- stack_tables_for_writexl(pd$undirected_link_matrices_by_variable)
+    stacked_directed <- stack_tables_for_writexl(pd$link_matrices_by_variable)
+    
+    sheets_to_export <- list(
+      "Summary" = pd$linkography_summary,
+      "Descriptive Statistics" = pd$descriptive_statistics,
+      "Span Overall Stats" = span_data$overall_stats,
+      "Span Categories" = span_data$span_cats,
+      "Span Move Stats" = span_data$move_stats,
+      "Link Span Matrix" = pd$distance_table,
+      "Inter Intra Links" = pd$inter_intra_links_by_variable,
+      "Move Direction Counts" = pd$move_direction_counts,
+      "Move Direction Class" = pd$moves_with_direction_classification,
+      "Move Dir by Variable" = pd$move_direction_by_variable_wide,
+      "CM Ranking List" = pd$directional_scores,
+      "CM Threshold List" = pd$directional_cm_thresholds,
+      "CM Move Counts" = pd$directional_critical_move_counts,
+      "CM Counts by Variable" = pd$directional_critical_moves_by_variable,
+      "Undirected Link Matrices" = stacked_undirected,
+      "Directed Link Matrices" = stacked_directed
+    )
+    writexl::write_xlsx(sheets_to_export, path = file)
+  }
+  
+  # Link Span Dedicated Download
+  output$downloadSpanOutputs <- downloadHandler(
+    filename = function() { paste0("linkography_outputs-", format(Sys.time(), "%Y-%m-%d_%H-%M-%S"), ".xlsx") },
     content = function(file) {
-      req(processed_data())
-      pd <- processed_data()
-      
-      # 1. Process the multi-table lists using our new stacking function
-      stacked_undirected <- stack_tables_for_writexl(pd$undirected_link_matrices_by_variable)
-      stacked_directed <- stack_tables_for_writexl(pd$link_matrices_by_variable)
-      
-      # 2. Build a named list of all sheets. 
-      # The names of the list become the exact Excel sheet names.
-      sheets_to_export <- list(
-        "Summary" = pd$linkography_summary,
-        "Descriptive Statistics" = pd$descriptive_statistics,
-        "Link Span" = pd$distance_table,
-        "Inter Intra Links" = pd$inter_intra_links_by_variable,
-        "Move Direction Counts" = pd$move_direction_counts,
-        "Move Direction Class" = pd$moves_with_direction_classification,
-        "Move Dir by Variable" = pd$move_direction_by_variable_wide,
-        "CM Ranking List" = pd$directional_scores,
-        "CM Threshold List" = pd$directional_cm_thresholds,
-        "CM Move Counts" = pd$directional_critical_move_counts,
-        "CM Counts by Variable" = pd$directional_critical_moves_by_variable,
-        "Undirected Link Matrices" = stacked_undirected,
-        "Directed Link Matrices" = stacked_directed
-      )
-      
-      # 3. Write it out perfectly compiled for WebAssembly
-      writexl::write_xlsx(sheets_to_export, path = file)
+      req(processed_data(), span_analysis_data())
+      generate_master_export(file, processed_data(), span_analysis_data())
     }
   )
   
-  # Duplicate Download Handler for the Move Classification Tab
+  # Move Classification Dedicated Download
   output$downloadClassOutputs <- downloadHandler(
-    filename = function() {
-      paste0("linkography_outputs-", format(Sys.time(), "%Y-%m-%d_%H-%M-%S"), ".xlsx")
-    },
+    filename = function() { paste0("linkography_outputs-", format(Sys.time(), "%Y-%m-%d_%H-%M-%S"), ".xlsx") },
     content = function(file) {
-      req(processed_data())
-      pd <- processed_data()
-      
-      # 1. Process the multi-table lists using the stacking function
-      stacked_undirected <- stack_tables_for_writexl(pd$undirected_link_matrices_by_variable)
-      stacked_directed <- stack_tables_for_writexl(pd$link_matrices_by_variable)
-      
-      # 2. Build a named list of all sheets. 
-      sheets_to_export <- list(
-        "Summary" = pd$linkography_summary,
-        "Descriptive Statistics" = pd$descriptive_statistics,
-        "Link Span" = pd$distance_table,
-        "Inter Intra Links" = pd$inter_intra_links_by_variable,
-        "Move Direction Counts" = pd$move_direction_counts,
-        "Move Direction Class" = pd$moves_with_direction_classification,
-        "Move Dir by Variable" = pd$move_direction_by_variable_wide,
-        "CM Ranking List" = pd$directional_scores,
-        "CM Threshold List" = pd$directional_cm_thresholds,
-        "CM Move Counts" = pd$directional_critical_move_counts,
-        "CM Counts by Variable" = pd$directional_critical_moves_by_variable,
-        "Undirected Link Matrices" = stacked_undirected,
-        "Directed Link Matrices" = stacked_directed
-      )
-      
-      # 3. Write it out cleanly using writexl
-      writexl::write_xlsx(sheets_to_export, path = file)
+      req(processed_data(), span_analysis_data())
+      generate_master_export(file, processed_data(), span_analysis_data())
+    }
+  )
+  
+  # Critical Moves Dedicated Download
+  output$downloadQuantOutputs <- downloadHandler(
+    filename = function() { paste0("linkography_outputs-", format(Sys.time(), "%Y-%m-%d_%H-%M-%S"), ".xlsx") },
+    content = function(file) {
+      req(processed_data(), span_analysis_data())
+      generate_master_export(file, processed_data(), span_analysis_data())
     }
   )
   
