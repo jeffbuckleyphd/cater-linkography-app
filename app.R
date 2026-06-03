@@ -1076,7 +1076,9 @@ ui <- page_navbar(
       tags$span(
         style = "color: var(--cater-midnight); font-weight: 700;",
         "Nicolaas Blom & Jeffrey Buckley"
-      )
+      ), 
+      tags$br(),
+      tags$em("Based on the work of Gabriella Goldschmidt (2014)")
     )
   )
 )
